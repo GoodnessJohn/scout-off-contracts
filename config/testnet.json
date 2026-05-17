@@ -1,0 +1,8 @@
+{
+  "network": "testnet",
+  "rpc_url": "https://soroban-testnet.stellar.org",
+  "horizon_url": "https://horizon-testnet.stellar.org",
+  "network_passphrase": "Test SDF Network ; September 2015",
+  "friendbot_url": "https://friendbot.stellar.org",
+  "xlm_token_address": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC"
+}
