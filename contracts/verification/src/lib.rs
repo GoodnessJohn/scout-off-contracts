@@ -388,6 +388,38 @@ mod tests {
     }
 
     #[test]
+    fn test_two_validators_approve_milestones_for_same_player() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+
+        let validator1 = Address::generate(&env);
+        let validator2 = Address::generate(&env);
+        client.register_validator(&validator1, &String::from_str(&env, "Coach A"));
+        client.register_validator(&validator2, &String::from_str(&env, "Coach B"));
+
+        client.approve_milestone(
+            &validator1,
+            &1u64,
+            &String::from_str(&env, "Identity verified"),
+            &String::from_str(&env, "QmEvidence1"),
+        );
+        client.approve_milestone(
+            &validator2,
+            &1u64,
+            &String::from_str(&env, "Top speed 32 km/h"),
+            &String::from_str(&env, "QmEvidence2"),
+        );
+
+        assert_eq!(client.get_milestone_count(&1u64), 2);
+
+        let m1 = client.get_milestone(&1u64, &1);
+        let m2 = client.get_milestone(&1u64, &2);
+        assert_eq!(m1.validator, validator1);
+        assert_eq!(m2.validator, validator2);
+    }
+
+    #[test]
     #[should_panic(expected = "Error(Contract, #3)")]
     fn test_approve_milestone_blocked_when_paused() {
         let (env, client) = setup();
