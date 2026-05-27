@@ -89,3 +89,19 @@ Handles scout subscriptions, pay-to-contact, and trial offer logging.
 | 1 | `VerifiedIdentity` | Validator approves identity milestone |
 | 2 | `PerformanceMilestones` | Validator approves performance milestone |
 | 3 | `EliteTier` | Scout logs trial offer |
+
+---
+
+## Events
+
+| Event | Contract | Emitted When |
+|-------|----------|-------------|
+| `player_registered` | registration | New player profile created |
+| `scout_registered` | registration | New scout profile created |
+| `profile_updated` | registration | Player updates IPFS content hashes |
+| `milestone_approved` | verification | Validator confirms a player achievement |
+| `progress_updated` | progress | Player advances to a new level |
+| `scout_subscribed` | scout_access | Scout purchases a subscription |
+| `player_contacted` | scout_access | Scout pays to unlock player contact |
+| `trial_offer_logged` | scout_access | Scout records a trial offer |
+| `fees_withdrawn` | scout_access | Admin withdraws accumulated fees |
