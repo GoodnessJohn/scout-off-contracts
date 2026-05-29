@@ -598,4 +598,27 @@ mod tests {
         // This should panic with ContractPaused error
         client.register_scout(&wallet, &region);
     }
+
+    // -------------------------------------------------------------------------
+    // Issue #23: pause_contract blocking update_profile
+    // -------------------------------------------------------------------------
+
+    #[test]
+    #[should_panic]
+    fn test_update_profile_blocked_when_paused() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+
+        let wallet = Address::generate(&env);
+        let vitals = dummy_vitals(&env);
+        let hashes = vec![&env, String::from_str(&env, "QmTest")];
+        let player_id = client.register_player(&wallet, &vitals, &hashes);
+
+        client.pause_contract();
+
+        let new_hashes = vec![&env, String::from_str(&env, "QmNew")];
+        // This should panic with ContractPaused error
+        client.update_profile(&player_id, &new_hashes);
+    }
 }
