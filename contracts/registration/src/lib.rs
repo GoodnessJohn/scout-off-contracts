@@ -58,8 +58,8 @@ impl RegistrationContract {
         vitals: PlayerVitals,
         ipfs_hashes: Vec<String>,
     ) -> Result<u64, ScoutChainError> {
-        Self::require_not_paused(&env)?;
         Self::require_initialized(&env)?;
+        Self::require_not_paused(&env)?;
         wallet.require_auth();
 
         // Prevent duplicate registrations
@@ -139,8 +139,8 @@ impl RegistrationContract {
         wallet: Address,
         region: String,
     ) -> Result<u64, ScoutChainError> {
-        Self::require_not_paused(&env)?;
         Self::require_initialized(&env)?;
+        Self::require_not_paused(&env)?;
         wallet.require_auth();
 
         if env
@@ -539,6 +539,29 @@ mod tests {
         let exactly_128 = String::from_str(&env, &"A".repeat(128));
         let scout_id = client.register_scout(&wallet, &exactly_128);
         assert_eq!(scout_id, 1);
+    }
+
+    // -------------------------------------------------------------------------
+    // Issue #28: require_initialized before require_not_paused
+    // -------------------------------------------------------------------------
+
+    #[test]
+    #[should_panic(expected = "NotInitialized")]
+    fn test_register_player_uninitialized_returns_not_initialized() {
+        let (env, client) = setup();
+        let wallet = Address::generate(&env);
+        let vitals = dummy_vitals(&env);
+        let hashes = vec![&env, String::from_str(&env, "QmTest")];
+        client.register_player(&wallet, &vitals, &hashes);
+    }
+
+    #[test]
+    #[should_panic(expected = "NotInitialized")]
+    fn test_register_scout_uninitialized_returns_not_initialized() {
+        let (env, client) = setup();
+        let wallet = Address::generate(&env);
+        let region = String::from_str(&env, "Europe");
+        client.register_scout(&wallet, &region);
     }
 
     // -------------------------------------------------------------------------
