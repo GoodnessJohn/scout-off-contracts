@@ -110,8 +110,11 @@ impl ProgressContract {
     // Queries
     // -------------------------------------------------------------------------
 
-    pub fn get_level(env: Env, player_id: u64) -> ProgressLevel {
-        Self::get_current_level(&env, player_id)
+    pub fn get_level(env: Env, player_id: u64) -> Result<ProgressLevel, ProgressError> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::PlayerLevel(player_id))
+            .ok_or(ProgressError::PlayerNotFound)
     }
 
     pub fn get_history_count(env: Env, player_id: u64) -> u32 {
@@ -199,6 +202,26 @@ mod tests {
         let id = env.register_contract(None, ProgressContract);
         let client = ProgressContractClient::new(&env, &id);
         (env, client)
+    }
+
+    #[test]
+    fn test_get_level_unregistered_returns_player_not_found() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+        let result = client.try_get_level(&999u64);
+        assert_eq!(result, Err(Ok(ProgressError::PlayerNotFound)));
+    }
+
+    #[test]
+    fn test_get_level_registered_returns_correct_level() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+        let validator = Address::generate(&env);
+        let player_id = 1u64;
+        client.advance_level(&validator, &player_id, &1u32);
+        assert_eq!(client.get_level(&player_id), ProgressLevel::VerifiedIdentity);
     }
 
     #[test]
