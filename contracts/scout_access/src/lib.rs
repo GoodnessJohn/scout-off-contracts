@@ -555,6 +555,18 @@ mod tests {
 
     #[test]
     #[should_panic]
+    fn test_trial_offer_rejected_for_basic_tier() {
+        let (env, admin, xlm, contract_id, client) = setup();
+        let scout = Address::generate(&env);
+        mint_token(&env, &xlm, &admin, &scout, 100_000_000);
+
+        // Basic tier — not allowed to log trial offers
+        client.subscribe(&scout, &SubscriptionTier::Basic);
+        client.log_trial_offer(&scout, &1u64, &String::from_str(&env, "QmDetails"));
+    }
+
+    #[test]
+    #[should_panic]
     fn test_contact_without_subscription_fails() {
         let (env, _, _, _, client) = setup();
         let scout = Address::generate(&env);
