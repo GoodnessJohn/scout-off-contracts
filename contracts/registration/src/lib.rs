@@ -885,3 +885,53 @@ mod tests {
             client.verify_scout(&scout_id);
         });
     }
+
+    // -------------------------------------------------------------------------
+    // Issue #33: Full player registration and profile update flow
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_full_player_registration_and_update_flow() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+
+        let wallet = Address::generate(&env);
+        let vitals = dummy_vitals(&env);
+        let initial_hashes = vec![&env, String::from_str(&env, "QmInitial1")];
+
+        // Step 1: Register player
+        let player_id = client.register_player(&wallet, &vitals, &initial_hashes);
+        assert_eq!(player_id, 1);
+
+        // Step 2: Get profile and verify initial state
+        let profile_v1 = client.get_player(&player_id);
+        assert_eq!(profile_v1.player_id, player_id);
+        assert_eq!(profile_v1.wallet, wallet);
+        assert_eq!(profile_v1.level, ProgressLevel::Unverified);
+        assert_eq!(profile_v1.ipfs_hashes.len(), 1);
+        assert_eq!(profile_v1.ipfs_hashes.get(0), String::from_str(&env, "QmInitial1"));
+        let registered_at = profile_v1.registered_at;
+        let updated_at_v1 = profile_v1.updated_at;
+
+        // Step 3: Update profile with new hashes
+        let updated_hashes = vec![
+            &env,
+            String::from_str(&env, "QmUpdated1"),
+            String::from_str(&env, "QmUpdated2"),
+        ];
+        client.update_profile(&player_id, &updated_hashes);
+
+        // Step 4: Read back updated profile
+        let profile_v2 = client.get_player(&player_id);
+        assert_eq!(profile_v2.player_id, player_id);
+        assert_eq!(profile_v2.wallet, wallet);
+        assert_eq!(profile_v2.level, ProgressLevel::Unverified);
+        assert_eq!(profile_v2.ipfs_hashes.len(), 2);
+        assert_eq!(profile_v2.ipfs_hashes.get(0), String::from_str(&env, "QmUpdated1"));
+        assert_eq!(profile_v2.ipfs_hashes.get(1), String::from_str(&env, "QmUpdated2"));
+
+        // Step 5: Verify timestamps
+        assert_eq!(profile_v2.registered_at, registered_at);
+        assert!(profile_v2.updated_at > updated_at_v1);
+    }
