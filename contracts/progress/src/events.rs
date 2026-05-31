@@ -11,6 +11,7 @@ pub fn admin_transferred(env: &Env, old_admin: &Address, new_admin: &Address) {
 pub fn progress_updated(
     env: &Env,
     player_id: u64,
+    old_level: &ProgressLevel,
     new_level: &ProgressLevel,
     updated_by: &Address,
 ) {
@@ -19,6 +20,6 @@ pub fn progress_updated(
             Symbol::new(env, "progress_updated"),
             updated_by.clone(),
         ),
-        (player_id, new_level.clone()),
+        (player_id, old_level.clone(), new_level.clone()),
     );
 }

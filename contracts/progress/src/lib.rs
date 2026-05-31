@@ -102,7 +102,7 @@ impl ProgressContract {
             .persistent()
             .set(&DataKey::PlayerLevel(player_id), &new_level);
 
-        events::progress_updated(&env, player_id, &new_level, &caller);
+        events::progress_updated(&env, player_id, &entry.old_level, &new_level, &caller);
         Ok(new_level)
     }
 
@@ -219,7 +219,7 @@ impl ProgressContract {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::{testutils::Address as _, Env};
+    use soroban_sdk::{testutils::Address as _, testutils::Events as _, IntoVal, Env, Symbol};
 
     fn setup() -> (Env, ProgressContractClient<'static>) {
         let env = Env::default();
@@ -335,6 +335,42 @@ mod tests {
         // Player 999 has never had advance_level called
         let history = client.get_progress_history(&999u64);
         assert_eq!(history.len(), 0);
+    }
+
+    #[test]
+    fn test_progress_updated_event_data() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+
+        let validator = Address::generate(&env);
+        let player_id = 5u64;
+
+        // Advance once: Unverified → VerifiedIdentity
+        client.advance_level(&validator, &player_id, &1u32);
+
+        // env.events().all() returns ContractEvents which compares against
+        // soroban_sdk::Vec<(Address, Vec<Val>, Val)>:
+        //   - Address  : the contract that emitted the event
+        //   - Vec<Val> : topics  — (Symbol("progress_updated"), updated_by)
+        //   - Val      : data    — (player_id, old_level, new_level)
+        let contract_id = client.address.clone();
+        assert_eq!(
+            env.events().all(),
+            soroban_sdk::vec![
+                &env,
+                (
+                    contract_id,
+                    soroban_sdk::vec![
+                        &env,
+                        Symbol::new(&env, "progress_updated").into_val(&env),
+                        validator.into_val(&env),
+                    ],
+                    (player_id, ProgressLevel::Unverified, ProgressLevel::VerifiedIdentity)
+                        .into_val(&env),
+                )
+            ]
+        );
     }
 
     #[test]
