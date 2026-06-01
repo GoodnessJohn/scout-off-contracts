@@ -118,4 +118,4 @@ Handles scout subscriptions, pay-to-contact, and trial offer logging.
 | `scout_subscribed` | scout_access | Scout purchases a subscription |
 | `player_contacted` | scout_access | Scout pays to unlock player contact |
 | `trial_offer_logged` | scout_access | Scout records a trial offer |
-| `fees_withdrawn` | scout_access | Admin withdraws accumulated fees |
+| `fees_withdrawn` | scout_access | Admin withdraws accumulated fees, including ledger timestamp |

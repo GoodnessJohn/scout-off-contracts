@@ -24,8 +24,8 @@ pub fn trial_offer_logged(env: &Env, player_id: u64, scout: &Address) {
 
 pub fn fees_withdrawn(env: &Env, to: &Address, amount: i128) {
     env.events().publish(
-        (Symbol::new(env, "fees_withdrawn"), to.clone()),
-        (amount, env.ledger().timestamp()),
+        (Symbol::new(env, "fees_withdrawn"),),
+        (to.clone(), amount, env.ledger().timestamp()),
     );
 }
 

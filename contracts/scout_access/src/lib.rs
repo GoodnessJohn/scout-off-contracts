@@ -195,4 +195,26 @@ mod tests {
         
         client.transfer_admin(&new_admin);
     }
+
+    #[test]
+    fn test_withdraw_fees_event() {
+        let (env, admin, xlm, client) = setup();
+        let scout = Address::generate(&env);
+        mint_token(&env, &xlm, &admin, &scout, 10_000_000);
+        client.subscribe(&scout, &SubscriptionTier::Basic);
+
+        // Advance ledger
+        env.ledger().with_mut(|l| l.timestamp = 12345);
+
+        client.withdraw_fees(&admin);
+
+        let event = env.events().all().vec().last().unwrap();
+        let (_, topics, data) = (event.0, event.1, event.2);
+        assert_eq!(topics.get(0).unwrap(), Symbol::new(&env, "fees_withdrawn").to_val());
+        
+        let (to, amount, timestamp): (Address, i128, u64) = data.unpack(&env);
+        assert_eq!(to, admin);
+        assert_eq!(amount, 1_000_000);
+        assert_eq!(timestamp, 12345);
+    }
 }
