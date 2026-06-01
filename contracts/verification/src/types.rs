@@ -1,4 +1,5 @@
 use soroban_sdk::{contracttype, Address, String};
+pub use scoutchain_shared_types::ContractHealth;
 
 /// A single verified milestone record
 #[contracttype]
@@ -30,14 +31,18 @@ pub enum DataKey {
     Admin,
     Initialized,
     Paused,
+    /// progress contract address (cross-contract calls)
+    ProgressContract,
     /// validator wallet → Validator
     Validator(Address),
     /// milestone counter per player
     MilestoneCounter(u64),
     /// (player_id, milestone_index) → Milestone
     Milestone(u64, u32),
-    /// registration contract address (cross-contract calls)
-    RegistrationContract,
+    /// progress contract address (cross-contract calls)
+    ProgressContract,
     /// milestone count per validator wallet
     ValidatorMilestoneCount(Address),
+    /// progress contract address (cross-contract calls)
+    ProgressContract,
 }

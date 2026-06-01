@@ -27,10 +27,9 @@ pub enum ScoutAccessError {
     Overflow = 10,
     /// The trial offer record was not found.
     TrialOfferNotFound = 11,
-    /// The call to the progress contract failed.
+    /// Scout attempted to downgrade to a cheaper tier while subscription is still active
+    SubscriptionDowngradeNotAllowed = 12,
     ProgressCallFailed = 14,
-    /// No fees are currently available to withdraw.
-    NoFeesToWithdraw = 15,
-    /// The admin has been transferred.
-    AdminTransferred = 16,
+    /// A fee field is zero or negative, or sub_duration_secs is zero
+    InvalidInput = 15,
 }
