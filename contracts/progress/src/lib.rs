@@ -266,6 +266,59 @@ mod tests {
     }
 
     #[test]
+    fn test_full_level_progression_with_history() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+
+        let validator = Address::generate(&env);
+        let player_id = 1u64;
+
+        // Advance 0 → 1
+        client.advance_level(&validator, &player_id, &1u32);
+        // Advance 1 → 2
+        client.advance_level(&validator, &player_id, &2u32);
+        // Advance 2 → 3
+        client.advance_level(&validator, &player_id, &3u32);
+
+        // Asserts get_level returns EliteTier
+        assert_eq!(client.get_level(&player_id), ProgressLevel::EliteTier);
+
+        // Asserts get_history_count returns 3
+        assert_eq!(client.get_history_count(&player_id), 3);
+
+        // Reads each ProgressEntry and asserts old_level and new_level form a valid chain
+        let e1 = client.get_history_entry(&player_id, &1u32);
+        assert_eq!(e1.old_level, ProgressLevel::Unverified);
+        assert_eq!(e1.new_level, ProgressLevel::VerifiedIdentity);
+
+        let e2 = client.get_history_entry(&player_id, &2u32);
+        assert_eq!(e2.old_level, ProgressLevel::VerifiedIdentity);
+        assert_eq!(e2.new_level, ProgressLevel::PerformanceMilestones);
+
+        let e3 = client.get_history_entry(&player_id, &3u32);
+        assert_eq!(e3.old_level, ProgressLevel::PerformanceMilestones);
+        assert_eq!(e3.new_level, ProgressLevel::EliteTier);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_fourth_advance_panics() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+
+        let validator = Address::generate(&env);
+        let player_id = 1u64;
+
+        client.advance_level(&validator, &player_id, &1u32);
+        client.advance_level(&validator, &player_id, &2u32);
+        client.advance_level(&validator, &player_id, &3u32);
+        // This should panic — already at EliteTier
+        client.advance_level(&validator, &player_id, &4u32);
+    }
+
+    #[test]
     #[should_panic]
     fn test_old_admin_loses_access_after_transfer() {
         let (env, client) = setup();
