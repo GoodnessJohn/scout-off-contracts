@@ -31,8 +31,15 @@ pub fn trial_offer_logged(env: &Env, player_id: u64, scout: &Address) {
 
 pub fn fees_withdrawn(env: &Env, to: &Address, amount: i128) {
     env.events().publish(
-        (Symbol::new(env, "fees_withdrawn"), to.clone()),
-        amount,
+        (Symbol::new(env, "fees_withdrawn"),),
+        (to.clone(), amount, env.ledger().timestamp()),
+    );
+}
+
+pub fn admin_transferred(env: &Env, old_admin: &Address, new_admin: &Address) {
+    env.events().publish(
+        (Symbol::new(env, "admin_transferred"), old_admin.clone(), new_admin.clone()),
+        (),
     );
 }
 

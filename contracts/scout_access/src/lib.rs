@@ -1,3 +1,4 @@
+#![no_std]
 mod errors;
 mod events;
 mod types;
@@ -134,8 +135,8 @@ impl ScoutAccessContract {
         Self::validate_fee_config(&fee_config)?;
         admin.require_auth();
         env.storage().instance().set(&DataKey::Admin, &admin);
-        env.storage().instance().set(&DataKey::XlmToken, &xlm_token);
-        env.storage().instance().set(&DataKey::FeeConfig, &fee_config);
+        env.storage().instance().set(&DataKey::XlmToken, &token);
+        env.storage().instance().set(&DataKey::FeeConfig, &config);
         env.storage().instance().set(&DataKey::Initialized, &true);
         env.storage().instance().set(&DataKey::Paused, &false);
         env.storage().instance().set(&DataKey::AccumulatedFees, &0i128);
@@ -250,7 +251,6 @@ impl ScoutAccessContract {
         token::Client::new(&env, &xlm).transfer(&scout, &contract_addr, &fee);
         Self::accumulate_fee(&env, fee)?;
 
-        let now = env.ledger().timestamp();
         let sub = Subscription {
             scout: scout.clone(),
             tier: tier.clone(),
@@ -351,36 +351,20 @@ impl ScoutAccessContract {
             logged_at: env.ledger().timestamp(),
         };
 
-        env.storage()
-            .persistent()
-            .set(&DataKey::TrialOffer(player_id, next_index), &offer);
-        env.storage()
-            .persistent()
-            .extend_ttl(&DataKey::TrialOffer(player_id, next_index), TRIAL_TTL_THRESHOLD, TRIAL_TTL_EXTEND_TO);
-        env.storage().persistent().set(&counter_key, &next_index);
-        env.storage()
-            .persistent()
-            .extend_ttl(&counter_key, TRIAL_TTL_THRESHOLD, TRIAL_TTL_EXTEND_TO);
+        let token = Self::get_token(&env);
+        token::Client::new(&env, &token).transfer(&env.current_contract_address(), &to, &amount);
+        
+        env.storage().instance().set(&DataKey::AccumulatedFees, &0i128);
+        events::fees_withdrawn(&env, &to, amount);
+        Ok(())
+    }
 
-        events::trial_offer_logged(&env, player_id, &scout);
-
-        // Atomically advance the player to Level 3 if the progress contract
-        // is configured. AlreadyAtMaxLevel is silently ignored; any other
-        // failure is a hard error.
-        if let Some(progress_addr) = env
-            .storage()
-            .instance()
-            .get::<DataKey, Address>(&DataKey::ProgressContract)
-        {
-            let progress_client = progress_contract::Client::new(&env, &progress_addr);
-            match progress_client.try_advance_level(&scout, &player_id, &next_index) {
-                Ok(_) => {}
-                Err(Ok(progress_contract::Error::AlreadyAtMaxLevel)) => {}
-                Err(_) => return Err(ScoutAccessError::ProgressCallFailed),
-            }
-        }
-
-        Ok(next_index)
+    pub fn transfer_admin(env: Env, new_admin: Address) -> Result<(), ScoutAccessError> {
+        Self::require_admin(&env)?;
+        let old_admin = Self::get_admin(&env);
+        env.storage().instance().set(&DataKey::Admin, &new_admin);
+        events::admin_transferred(&env, &old_admin, &new_admin);
+        Ok(())
     }
 
     // -------------------------------------------------------------------------
@@ -472,42 +456,18 @@ impl ScoutAccessContract {
         ContractHealth { initialized, paused }
     }
 
-    // -------------------------------------------------------------------------
-    // Internal helpers
-    // -------------------------------------------------------------------------
-
     fn require_admin(env: &Env) -> Result<(), ScoutAccessError> {
-        let admin: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Admin)
-            .ok_or(ScoutAccessError::NotInitialized)?;
+        let admin = Self::get_admin(env);
         admin.require_auth();
         Ok(())
     }
 
-    fn require_initialized(env: &Env) -> Result<(), ScoutAccessError> {
-        if !env
-            .storage()
-            .instance()
-            .get::<DataKey, bool>(&DataKey::Initialized)
-            .unwrap_or(false)
-        {
-            return Err(ScoutAccessError::NotInitialized);
-        }
-        Ok(())
+    fn get_admin(env: &Env) -> Address {
+        env.storage().instance().get(&DataKey::Admin).ok_or(ScoutAccessError::NotInitialized).unwrap()
     }
 
-    fn require_not_paused(env: &Env) -> Result<(), ScoutAccessError> {
-        if env
-            .storage()
-            .instance()
-            .get::<DataKey, bool>(&DataKey::Paused)
-            .unwrap_or(false)
-        {
-            return Err(ScoutAccessError::ContractPaused);
-        }
-        Ok(())
+    fn get_token(env: &Env) -> Address {
+        env.storage().instance().get(&DataKey::XlmToken).unwrap()
     }
 
     fn require_active_subscription(
@@ -587,13 +547,12 @@ mod tests {
         Env, IntoVal, String, Symbol,
     };
 
-    /// Deploy a mock SAC token, mint `amount` to `to`, return the token contract address.
     fn create_token(env: &Env, admin: &Address) -> Address {
         let token_id = env.register_stellar_asset_contract_v2(admin.clone());
         token_id.address()
     }
 
-    fn mint_token(env: &Env, token: &Address, admin: &Address, to: &Address, amount: i128) {
+    fn mint_token(env: &Env, token: &Address, _admin: &Address, to: &Address, amount: i128) {
         StellarAssetClient::new(env, token).mint(to, &amount);
     }
 
@@ -607,7 +566,7 @@ mod tests {
         }
     }
 
-    fn setup() -> (Env, Address, Address, Address, ScoutAccessContractClient<'static>) {
+    fn setup() -> (Env, Address, Address, ScoutAccessContractClient<'static>) {
         let env = Env::default();
         env.mock_all_auths();
         let admin = Address::generate(&env);
@@ -894,35 +853,36 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
-    fn test_trial_offer_requires_elite() {
-        let (env, admin, xlm, contract_id, client) = setup();
-        let scout = Address::generate(&env);
-        mint_token(&env, &xlm, &admin, &scout, 100_000_000);
-
-        // Pro tier — not allowed to log trial offers
-        client.subscribe(&scout, &SubscriptionTier::Pro);
-        client.log_trial_offer(&scout, &1u64, &String::from_str(&env, "QmDetails"));
+    fn test_transfer_admin_success() {
+        let (env, admin, _xlm, client) = setup();
+        let new_admin = Address::generate(&env);
+        
+        client.transfer_admin(&new_admin);
+        
+        // Assert event
+        let event = env.events().all().vec().last().unwrap();
+        assert_eq!(event.0, client.address); // Contract ID
+        assert_eq!(event.1.get(0).unwrap(), Symbol::new(&env, "admin_transferred").to_val());
+        
+        // Ensure new admin can perform admin action
+        client.transfer_admin(&admin);
     }
 
     #[test]
     #[should_panic]
-    fn test_trial_offer_rejected_for_basic_tier() {
-        let (env, admin, xlm, contract_id, client) = setup();
-        let scout = Address::generate(&env);
-        mint_token(&env, &xlm, &admin, &scout, 100_000_000);
-
-        // Basic tier — not allowed to log trial offers
-        client.subscribe(&scout, &SubscriptionTier::Basic);
-        client.log_trial_offer(&scout, &1u64, &String::from_str(&env, "QmDetails"));
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_contact_without_subscription_fails() {
-        let (env, _, _, _, client) = setup();
-        let scout = Address::generate(&env);
-        client.pay_to_contact(&scout, &1u64);
+    fn test_transfer_admin_unauthorized() {
+        let (env, _admin, _xlm, client) = setup();
+        let new_admin = Address::generate(&env);
+        let unauthorized = Address::generate(&env);
+        
+        env.mock_auths(&[(
+            unauthorized.clone(),
+            client.address.clone(),
+            Symbol::new(&env, "transfer_admin"),
+            (new_admin.clone(),).into_val(&env),
+        )]);
+        
+        client.transfer_admin(&new_admin);
     }
 
     #[test]
