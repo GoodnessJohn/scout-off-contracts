@@ -127,7 +127,7 @@ impl ScoutAccessContract {
             .persistent()
             .extend_ttl(&DataKey::Subscription(scout.clone()), PERSISTENT_TTL_MIN, PERSISTENT_TTL_MAX);
 
-        events::scout_subscribed(&env, &scout, &tier);
+        events::scout_subscribed(&env, &scout, &tier, fee);
         Ok(())
     }
 
@@ -461,6 +461,58 @@ mod tests {
         assert_eq!(sub.tier, SubscriptionTier::Basic);
         assert!(sub.expires_at > sub.subscribed_at);
         assert_eq!(client.get_accumulated_fees(), 1_000_000);
+    }
+
+    #[test]
+    fn test_scout_subscribed_event_includes_fee_paid() {
+        let (env, admin, xlm, _contract_id, client) = setup();
+        let scout = Address::generate(&env);
+        mint_token(&env, &xlm, &admin, &scout, 10_000_000);
+
+        client.subscribe(&scout, &SubscriptionTier::Basic);
+
+        // Find the scout_subscribed event.
+        let events = env.events().all();
+        let sub_event = events.iter().find(|(_, topics, _)| {
+            if let Some(first) = topics.first() {
+                if let Ok(sym) = Symbol::try_from_val(&env, &first) {
+                    return sym == Symbol::new(&env, "scout_subscribed");
+                }
+            }
+            false
+        });
+
+        let (_, _, data) = sub_event.expect("scout_subscribed event not found");
+        // Data is published as (tier: SubscriptionTier, fee_paid: i128).
+        let (tier, fee_paid): (SubscriptionTier, i128) =
+            soroban_sdk::FromVal::from_val(&env, &data);
+        assert_eq!(tier, SubscriptionTier::Basic);
+        assert_eq!(fee_paid, default_fees().basic_sub_stroops);
+    }
+
+    #[test]
+    fn test_scout_subscribed_event_fee_pro_tier() {
+        let (env, admin, xlm, _contract_id, client) = setup();
+        let scout = Address::generate(&env);
+        mint_token(&env, &xlm, &admin, &scout, 10_000_000);
+
+        client.subscribe(&scout, &SubscriptionTier::Pro);
+
+        let events = env.events().all();
+        let sub_event = events.iter().find(|(_, topics, _)| {
+            if let Some(first) = topics.first() {
+                if let Ok(sym) = Symbol::try_from_val(&env, &first) {
+                    return sym == Symbol::new(&env, "scout_subscribed");
+                }
+            }
+            false
+        });
+
+        let (_, _, data) = sub_event.expect("scout_subscribed event not found");
+        let (tier, fee_paid): (SubscriptionTier, i128) =
+            soroban_sdk::FromVal::from_val(&env, &data);
+        assert_eq!(tier, SubscriptionTier::Pro);
+        assert_eq!(fee_paid, default_fees().pro_sub_stroops);
     }
 
     #[test]

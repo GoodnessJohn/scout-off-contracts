@@ -93,6 +93,15 @@ Handles scout subscriptions, pay-to-contact, and trial offer logging.
 | `pause_contract()` / `unpause_contract()` | admin | Circuit breaker |
 | `health()` | — | Returns true if initialized |
 
+### Events
+
+| Event | Topics | Data | Description |
+|-------|--------|------|-------------|
+| `scout_subscribed` | event_name, scout_address | (tier: SubscriptionTier, fee_paid: i128) | Emitted when a scout purchases a subscription; includes the tier and the exact fee charged in stroops |
+| `player_contacted` | event_name, scout_address | (player_id: u64, fee_paid: i128) | Emitted when a scout pays to unlock a player's contact details; includes the player id and fee charged in stroops |
+| `trial_offer_logged` | event_name, scout_address | player_id: u64 | Emitted when an Elite scout records a trial offer on-chain |
+| `fees_withdrawn` | event_name, to_address | amount: i128 | Emitted when the admin withdraws accumulated platform fees |
+
 ---
 
 ## Progress Levels
@@ -115,7 +124,7 @@ Handles scout subscriptions, pay-to-contact, and trial offer logging.
 | `profile_updated` | registration | Player updates IPFS content hashes |
 | `milestone_approved` | verification | Validator confirms a player achievement |
 | `progress_updated` | progress | Player advances to a new level |
-| `scout_subscribed` | scout_access | Scout purchases a subscription |
-| `player_contacted` | scout_access | Scout pays to unlock player contact |
+| `scout_subscribed` | scout_access | Scout purchases a subscription — data: `(tier, fee_paid: i128)` |
+| `player_contacted` | scout_access | Scout pays to unlock player contact — data: `(player_id: u64, fee_paid: i128)` |
 | `trial_offer_logged` | scout_access | Scout records a trial offer |
 | `fees_withdrawn` | scout_access | Admin withdraws accumulated fees |
