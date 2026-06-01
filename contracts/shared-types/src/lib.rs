@@ -14,6 +14,13 @@ pub enum ProgressLevel {
     EliteTier,
 }
 
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct ContractHealth {
+    pub initialized: bool,
+    pub paused: bool,
+}
+
 impl ProgressLevel {
     /// Returns the next valid level, or None if already at the top.
     pub fn next(&self) -> Option<ProgressLevel> {
