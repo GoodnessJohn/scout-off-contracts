@@ -16,7 +16,7 @@ mod events;
 mod types;
 
 use errors::VerificationError;
-use types::{DataKey, Milestone, Validator};
+use types::{DataKey, Milestone, Validator, ValidatorStatus};
 
 use soroban_sdk::{contract, contractimpl, Address, Env, String};
 
@@ -249,12 +249,23 @@ impl VerificationContract {
             .ok_or(VerificationError::ValidatorNotFound)
     }
 
-    pub fn is_active_validator(env: Env, wallet: Address) -> bool {
-        env.storage()
+    /// Returns the detailed status of a validator wallet.
+    pub fn get_validator_status(env: Env, wallet: Address) -> ValidatorStatus {
+        match env
+            .storage()
             .persistent()
             .get::<DataKey, Validator>(&DataKey::Validator(wallet))
-            .map(|v| v.active)
-            .unwrap_or(false)
+        {
+            None => ValidatorStatus::NotRegistered,
+            Some(v) if v.active => ValidatorStatus::Active,
+            Some(_) => ValidatorStatus::Revoked,
+        }
+    }
+
+    /// Deprecated: use `get_validator_status` instead.
+    /// Returns true only for registered, active validators.
+    pub fn is_active_validator(env: Env, wallet: Address) -> bool {
+        Self::get_validator_status(env, wallet) == ValidatorStatus::Active
     }
 
     pub fn health(env: Env) -> bool {
@@ -298,6 +309,7 @@ impl VerificationContract {
 mod tests {
     use super::*;
     use soroban_sdk::{testutils::Address as _, Env, String};
+    use types::ValidatorStatus;
 
     fn setup() -> (Env, VerificationContractClient<'static>) {
         let env = Env::default();
@@ -526,5 +538,38 @@ mod tests {
 
         let unknown = Address::generate(&env);
         client.get_validator(&unknown);
+    }
+
+    #[test]
+    fn test_get_validator_status_not_registered() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+
+        let unknown = Address::generate(&env);
+        assert_eq!(client.get_validator_status(&unknown), ValidatorStatus::NotRegistered);
+    }
+
+    #[test]
+    fn test_get_validator_status_active() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+
+        let validator = Address::generate(&env);
+        client.register_validator(&validator, &String::from_str(&env, "Coach"));
+        assert_eq!(client.get_validator_status(&validator), ValidatorStatus::Active);
+    }
+
+    #[test]
+    fn test_get_validator_status_revoked() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+
+        let validator = Address::generate(&env);
+        client.register_validator(&validator, &String::from_str(&env, "Coach"));
+        client.revoke_validator(&validator);
+        assert_eq!(client.get_validator_status(&validator), ValidatorStatus::Revoked);
     }
 }

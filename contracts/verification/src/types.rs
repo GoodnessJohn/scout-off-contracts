@@ -1,5 +1,14 @@
 use soroban_sdk::{contracttype, Address, String};
 
+/// Richer validator status — distinguishes unregistered from revoked.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub enum ValidatorStatus {
+    NotRegistered,
+    Active,
+    Revoked,
+}
+
 /// A single verified milestone record
 #[contracttype]
 #[derive(Clone, Debug)]

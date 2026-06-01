@@ -616,4 +616,45 @@ mod tests {
         let sub = client.get_subscription(&scout);
         assert_eq!(sub.tier, SubscriptionTier::Basic);
     }
+
+    #[test]
+    fn test_withdraw_fees_transfers_correct_amount() {
+        let (env, admin, xlm, contract_id, client) = setup();
+        let scout = Address::generate(&env);
+        mint_token(&env, &xlm, &admin, &scout, 100_000_000);
+
+        // Subscribe (Elite) to accumulate fees
+        client.subscribe(&scout, &SubscriptionTier::Elite);
+        let expected_fees = client.get_accumulated_fees();
+        assert!(expected_fees > 0);
+
+        let recipient = Address::generate(&env);
+        let recipient_balance_before = TokenClient::new(&env, &xlm).balance(&recipient);
+
+        client.withdraw_fees(&recipient);
+
+        let recipient_balance_after = TokenClient::new(&env, &xlm).balance(&recipient);
+        assert_eq!(recipient_balance_after - recipient_balance_before, expected_fees);
+        assert_eq!(client.get_accumulated_fees(), 0);
+    }
+
+    #[test]
+    fn test_get_trial_offer_correct_data() {
+        let (env, admin, xlm, _contract_id, client) = setup();
+        let scout = Address::generate(&env);
+        mint_token(&env, &xlm, &admin, &scout, 100_000_000);
+
+        client.subscribe(&scout, &SubscriptionTier::Elite);
+
+        let details_hash = String::from_str(&env, "QmTrialOfferDetails");
+        let player_id: u64 = 42;
+        let logged_at_before = env.ledger().timestamp();
+        client.log_trial_offer(&scout, &player_id, &details_hash);
+
+        let offer = client.get_trial_offer(&player_id, &1u32);
+        assert_eq!(offer.player_id, player_id);
+        assert_eq!(offer.scout, scout);
+        assert_eq!(offer.details_hash, details_hash);
+        assert!(offer.logged_at >= logged_at_before);
+    }
 }
