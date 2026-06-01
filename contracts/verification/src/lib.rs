@@ -16,7 +16,7 @@ mod events;
 mod types;
 
 use errors::VerificationError;
-use types::{DataKey, Milestone, Validator};
+use types::{ContractHealth, DataKey, Milestone, Validator};
 
 use soroban_sdk::{contract, contractimpl, Address, Env, String};
 
@@ -24,9 +24,31 @@ use soroban_sdk::{contract, contractimpl, Address, Env, String};
 // The progress contract must be deployed and its address registered via
 // `set_progress_contract` before `approve_milestone` can advance levels.
 mod progress_contract {
-    soroban_sdk::contractimport!(
-        file = "../../target/wasm32-unknown-unknown/release/scoutchain_progress.wasm"
-    );
+    use scoutchain_shared_types::ProgressLevel;
+    use soroban_sdk::{contractclient, contracterror, Address, Env};
+
+    #[contracterror]
+    #[derive(Copy, Clone, Debug, PartialEq)]
+    #[repr(u32)]
+    pub enum Error {
+        AlreadyInitialized = 1,
+        NotInitialized = 2,
+        ContractPaused = 3,
+        Unauthorized = 4,
+        InvalidProgressTransition = 5,
+        AlreadyAtMaxLevel = 6,
+        PlayerNotFound = 7,
+    }
+
+    #[contractclient(name = "Client")]
+    pub trait ProgressContractClient {
+        fn advance_level(
+            env: Env,
+            caller: Address,
+            player_id: u64,
+            milestone_ref: u32,
+        ) -> Result<ProgressLevel, Error>;
+    }
 }
 
 #[contract]
@@ -123,13 +145,27 @@ impl VerificationContract {
 
     pub fn pause_contract(env: Env) -> Result<(), VerificationError> {
         Self::require_admin(&env)?;
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(VerificationError::NotInitialized)?;
+
         env.storage().instance().set(&DataKey::Paused, &true);
+        events::contract_paused(&env, &admin);
         Ok(())
     }
 
     pub fn unpause_contract(env: Env) -> Result<(), VerificationError> {
         Self::require_admin(&env)?;
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(VerificationError::NotInitialized)?;
+
         env.storage().instance().set(&DataKey::Paused, &false);
+        events::contract_unpaused(&env, &admin);
         Ok(())
     }
 
@@ -177,11 +213,14 @@ impl VerificationContract {
             .unwrap_or(0u32);
         let next_index = index.checked_add(1).ok_or(VerificationError::Overflow)?;
 
+        let description_for_event = description.clone();
+        let evidence_hash_for_event = evidence_hash.clone();
+
         let milestone = Milestone {
             player_id,
             validator: validator_wallet.clone(),
-            description,
-            evidence_hash,
+            description: description.clone(),
+            evidence_hash: evidence_hash.clone(),
             approved_at: env.ledger().timestamp(),
             ledger_sequence: env.ledger().sequence(),
         };
@@ -205,8 +244,8 @@ impl VerificationContract {
             player_id,
             &validator_wallet,
             next_index,
-            &milestone.description,
-            &milestone.evidence_hash,
+            &description,
+            &evidence_hash,
         );
 
         // Cross-contract call: advance the player's progress level.
@@ -276,11 +315,16 @@ impl VerificationContract {
             .unwrap_or(false)
     }
 
-    pub fn health(env: Env) -> bool {
-        env.storage()
+    pub fn health(env: Env) -> ContractHealth {
+        let initialized = env.storage()
             .instance()
             .get::<DataKey, bool>(&DataKey::Initialized)
-            .unwrap_or(false)
+            .unwrap_or(false);
+        let paused = env.storage()
+            .instance()
+            .get::<DataKey, bool>(&DataKey::Paused)
+            .unwrap_or(false);
+        ContractHealth { initialized, paused }
     }
 
     // -------------------------------------------------------------------------
@@ -316,11 +360,15 @@ impl VerificationContract {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::{testutils::Address as _, Env, String};
+    use soroban_sdk::{testutils::{Address as _, Events, Ledger}, Env, String, Symbol, IntoVal};
 
     fn setup() -> (Env, VerificationContractClient<'static>) {
         let env = Env::default();
+        env.ledger().with_mut(|l| l.sequence_number = 1);
         env.mock_all_auths();
+        env.ledger().with_mut(|l| {
+            l.sequence_number = 1;
+        });
         let id = env.register_contract(None, VerificationContract);
         let client = VerificationContractClient::new(&env, &id);
         (env, client)
@@ -567,6 +615,41 @@ mod tests {
             &1u64,
             &String::from_str(&env, "overflow test"),
             &String::from_str(&env, "QmHash"),
+        );
+    }
+
+    #[test]
+    fn test_pause_unpause_events() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+
+        client.pause_contract();
+        let events = env.events().all();
+        assert_eq!(
+            events,
+            soroban_sdk::vec![
+                &env,
+                (
+                    client.address.clone(),
+                    (Symbol::new(&env, "contract_paused"),).into_val(&env),
+                    admin.clone().into_val(&env)
+                )
+            ]
+        );
+
+        client.unpause_contract();
+        let events = env.events().all();
+        assert_eq!(
+            events,
+            soroban_sdk::vec![
+                &env,
+                (
+                    client.address.clone(),
+                    (Symbol::new(&env, "contract_unpaused"),).into_val(&env),
+                    admin.clone().into_val(&env)
+                )
+            ]
         );
     }
 
