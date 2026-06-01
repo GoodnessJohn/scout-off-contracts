@@ -104,7 +104,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
                 },
                 {
-                  "i128": "100000000"
+                  "i128": "10000000"
                 }
               ]
             }
@@ -128,7 +128,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Elite"
+                      "symbol": "Basic"
                     }
                   ]
                 }
@@ -149,50 +149,7 @@
                       "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
                     },
                     {
-                      "i128": "7000000"
-                    }
-                  ]
-                }
-              },
-              "sub_invocations": []
-            }
-          ]
-        }
-      ]
-    ],
-    [
-      [
-        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
-        {
-          "function": {
-            "contract_fn": {
-              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
-              "function_name": "pay_to_contact",
-              "args": [
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-                },
-                {
-                  "u64": "1"
-                }
-              ]
-            }
-          },
-          "sub_invocations": [
-            {
-              "function": {
-                "contract_fn": {
-                  "contract_address": "CBEPDNVYXQGWB5YUBXKJWYJA7OXTZW5LFLNO5JRRGE6Z6C5OSUZPCCEL",
-                  "function_name": "transfer",
-                  "args": [
-                    {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-                    },
-                    {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
-                    },
-                    {
-                      "i128": "100000"
+                      "i128": "1000000"
                     }
                   ]
                 }
@@ -207,13 +164,13 @@
   ],
   "ledger": {
     "protocol_version": 25,
-    "sequence_number": 0,
+    "sequence_number": 100500,
     "timestamp": 0,
     "network_id": "0000000000000000000000000000000000000000000000000000000000000000",
     "base_reserve": 0,
-    "min_persistent_entry_ttl": 4096,
+    "min_persistent_entry_ttl": 200,
     "min_temp_entry_ttl": 16,
-    "max_entry_ttl": 6312000,
+    "max_entry_ttl": 10000,
     "ledger_entries": [
       {
         "entry": {
@@ -274,7 +231,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 6311999
+        "live_until": 109999
       },
       {
         "entry": {
@@ -295,36 +252,6 @@
           "ext": "v0"
         },
         "live_until": 6311999
-      },
-      {
-        "entry": {
-          "last_modified_ledger_seq": 0,
-          "data": {
-            "contract_data": {
-              "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
-              "key": {
-                "vec": [
-                  {
-                    "symbol": "ContactRecord"
-                  },
-                  {
-                    "u64": "1"
-                  },
-                  {
-                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-                  }
-                ]
-              },
-              "durability": "persistent",
-              "val": {
-                "bool": true
-              }
-            }
-          },
-          "ext": "v0"
-        },
-        "live_until": 4095
       },
       {
         "entry": {
@@ -377,7 +304,7 @@
                     "val": {
                       "vec": [
                         {
-                          "symbol": "Elite"
+                          "symbol": "Basic"
                         }
                       ]
                     }
@@ -388,7 +315,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 4095
+        "live_until": 102000
       },
       {
         "entry": {
@@ -414,7 +341,7 @@
                         ]
                       },
                       "val": {
-                        "i128": "7100000"
+                        "i128": "1000000"
                       }
                     },
                     {
@@ -525,27 +452,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 4095
-      },
-      {
-        "entry": {
-          "last_modified_ledger_seq": 0,
-          "data": {
-            "contract_data": {
-              "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
-              "key": {
-                "ledger_key_nonce": {
-                  "nonce": "2032731177588607455"
-                }
-              },
-              "durability": "temporary",
-              "val": "void"
-            }
-          },
-          "ext": "v0"
-        },
-        "live_until": 6311999
+        "live_until": 100699
       },
       {
         "entry": {
@@ -565,7 +472,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 6311999
+        "live_until": 109999
       },
       {
         "entry": {
@@ -592,7 +499,7 @@
                       "symbol": "amount"
                     },
                     "val": {
-                      "i128": "7100000"
+                      "i128": "1000000"
                     }
                   },
                   {
@@ -617,7 +524,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 518400
+        "live_until": 109999
       },
       {
         "entry": {
@@ -644,7 +551,7 @@
                       "symbol": "amount"
                     },
                     "val": {
-                      "i128": "92900000"
+                      "i128": "9000000"
                     }
                   },
                   {
@@ -669,7 +576,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 518400
+        "live_until": 109999
       },
       {
         "entry": {
