@@ -34,6 +34,9 @@ jobs:
       - name: Run tests
         run: cargo test --workspace
 
+      - name: Test progress contract
+        run: cargo test -p scoutchain-progress -- --nocapture
+
       - name: Build WASM (release)
         run: cargo build --workspace --target wasm32-unknown-unknown --release
 

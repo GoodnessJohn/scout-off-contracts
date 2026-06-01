@@ -19,5 +19,8 @@ Thumbs.db
 .idea/
 *.swp
 
-# Local PR notes
+# Kiro IDE
+.kiro/
+
+# Pull-request drafts
 pr-*.md
