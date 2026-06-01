@@ -87,6 +87,7 @@ impl ScoutAccessContract {
         if env.storage().instance().has(&DataKey::Initialized) {
             return Err(ScoutAccessError::AlreadyInitialized);
         }
+        Self::validate_fee_config(&fee_config)?;
         admin.require_auth();
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::XlmToken, &xlm_token);
@@ -100,6 +101,7 @@ impl ScoutAccessContract {
 
     pub fn update_fee_config(env: Env, fee_config: FeeConfig) -> Result<(), ScoutAccessError> {
         Self::require_admin(&env)?;
+        Self::validate_fee_config(&fee_config)?;
         env.storage().instance().set(&DataKey::FeeConfig, &fee_config);
         Ok(())
     }
@@ -169,6 +171,21 @@ impl ScoutAccessContract {
         Self::require_not_paused(&env)?;
         Self::require_initialized(&env)?;
         scout.require_auth();
+
+        // Downgrade guard: if an active subscription exists, only allow same
+        // tier or an upgrade. Downgrades before expiry are rejected.
+        if let Some(existing) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, Subscription>(&DataKey::Subscription(scout.clone()))
+        {
+            let now = env.ledger().timestamp();
+            if now <= existing.expires_at
+                && Self::tier_rank(&tier) < Self::tier_rank(&existing.tier)
+            {
+                return Err(ScoutAccessError::SubscriptionDowngradeNotAllowed);
+            }
+        }
 
         let config = Self::fee_config(&env);
         let fee = match &tier {
@@ -477,10 +494,30 @@ impl ScoutAccessContract {
             .set(&DataKey::AccumulatedFees, &new_total);
         Ok(())
     }
-}
 
-// =============================================================================
-// Tests
+    /// Validate that every fee field is positive and sub_duration_secs is non-zero.
+    fn validate_fee_config(config: &FeeConfig) -> Result<(), ScoutAccessError> {
+        if config.contact_fee_stroops <= 0
+            || config.basic_sub_stroops <= 0
+            || config.pro_sub_stroops <= 0
+            || config.elite_sub_stroops <= 0
+            || config.sub_duration_secs == 0
+        {
+            return Err(ScoutAccessError::InvalidInput);
+        }
+        Ok(())
+    }
+
+    /// Numeric rank for a subscription tier (higher = more privileged).
+    /// Basic = 1, Pro = 2, Elite = 3.
+    fn tier_rank(tier: &SubscriptionTier) -> u32 {
+        match tier {
+            SubscriptionTier::Basic => 1,
+            SubscriptionTier::Pro => 2,
+            SubscriptionTier::Elite => 3,
+        }
+    }
+}
 // =============================================================================
 #[cfg(test)]
 mod tests {
@@ -831,5 +868,249 @@ mod tests {
         // basic_sub_stroops is 1,000_000
         let result = client.try_subscribe(&scout, &SubscriptionTier::Basic);
         assert_eq!(result, Err(Ok(ScoutAccessError::Overflow)));
+    }
+
+    // -------------------------------------------------------------------------
+    // validate_fee_config tests
+    // -------------------------------------------------------------------------
+
+    fn make_contract() -> (Env, Address, Address, ScoutAccessContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let xlm = create_token(&env, &admin);
+        let contract_id = env.register_contract(None, ScoutAccessContract);
+        let client = ScoutAccessContractClient::new(&env, &contract_id);
+        (env, admin, xlm, client)
+    }
+
+    #[test]
+    fn test_initialize_zero_contact_fee_returns_invalid_input() {
+        let (env, admin, xlm, client) = make_contract();
+        let bad_fees = FeeConfig {
+            contact_fee_stroops: 0,
+            ..default_fees()
+        };
+        let result = client.try_initialize(&admin, &xlm, &bad_fees);
+        assert_eq!(result, Err(Ok(ScoutAccessError::InvalidInput)));
+    }
+
+    #[test]
+    fn test_initialize_zero_basic_sub_returns_invalid_input() {
+        let (env, admin, xlm, client) = make_contract();
+        let bad_fees = FeeConfig {
+            basic_sub_stroops: 0,
+            ..default_fees()
+        };
+        let result = client.try_initialize(&admin, &xlm, &bad_fees);
+        assert_eq!(result, Err(Ok(ScoutAccessError::InvalidInput)));
+    }
+
+    #[test]
+    fn test_initialize_zero_pro_sub_returns_invalid_input() {
+        let (env, admin, xlm, client) = make_contract();
+        let bad_fees = FeeConfig {
+            pro_sub_stroops: 0,
+            ..default_fees()
+        };
+        let result = client.try_initialize(&admin, &xlm, &bad_fees);
+        assert_eq!(result, Err(Ok(ScoutAccessError::InvalidInput)));
+    }
+
+    #[test]
+    fn test_initialize_zero_elite_sub_returns_invalid_input() {
+        let (env, admin, xlm, client) = make_contract();
+        let bad_fees = FeeConfig {
+            elite_sub_stroops: 0,
+            ..default_fees()
+        };
+        let result = client.try_initialize(&admin, &xlm, &bad_fees);
+        assert_eq!(result, Err(Ok(ScoutAccessError::InvalidInput)));
+    }
+
+    #[test]
+    fn test_initialize_zero_sub_duration_returns_invalid_input() {
+        let (env, admin, xlm, client) = make_contract();
+        let bad_fees = FeeConfig {
+            sub_duration_secs: 0,
+            ..default_fees()
+        };
+        let result = client.try_initialize(&admin, &xlm, &bad_fees);
+        assert_eq!(result, Err(Ok(ScoutAccessError::InvalidInput)));
+    }
+
+    #[test]
+    fn test_initialize_negative_fee_returns_invalid_input() {
+        let (env, admin, xlm, client) = make_contract();
+        let bad_fees = FeeConfig {
+            contact_fee_stroops: -1,
+            ..default_fees()
+        };
+        let result = client.try_initialize(&admin, &xlm, &bad_fees);
+        assert_eq!(result, Err(Ok(ScoutAccessError::InvalidInput)));
+    }
+
+    #[test]
+    fn test_initialize_valid_fee_config_succeeds() {
+        let (env, admin, xlm, client) = make_contract();
+        let result = client.try_initialize(&admin, &xlm, &default_fees());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_update_fee_config_zero_subscription_fee_returns_invalid_input() {
+        let (_, _, _, _, client) = setup();
+        let bad_fees = FeeConfig {
+            basic_sub_stroops: 0,
+            ..default_fees()
+        };
+        let result = client.try_update_fee_config(&bad_fees);
+        assert_eq!(result, Err(Ok(ScoutAccessError::InvalidInput)));
+    }
+
+    #[test]
+    fn test_update_fee_config_zero_contact_fee_returns_invalid_input() {
+        let (_, _, _, _, client) = setup();
+        let bad_fees = FeeConfig {
+            contact_fee_stroops: 0,
+            ..default_fees()
+        };
+        let result = client.try_update_fee_config(&bad_fees);
+        assert_eq!(result, Err(Ok(ScoutAccessError::InvalidInput)));
+    }
+
+    #[test]
+    fn test_update_fee_config_zero_duration_returns_invalid_input() {
+        let (_, _, _, _, client) = setup();
+        let bad_fees = FeeConfig {
+            sub_duration_secs: 0,
+            ..default_fees()
+        };
+        let result = client.try_update_fee_config(&bad_fees);
+        assert_eq!(result, Err(Ok(ScoutAccessError::InvalidInput)));
+    }
+
+    #[test]
+    fn test_update_fee_config_valid_succeeds() {
+        let (_, _, _, _, client) = setup();
+        let new_fees = FeeConfig {
+            contact_fee_stroops: 200_000,
+            basic_sub_stroops: 2_000_000,
+            pro_sub_stroops: 5_000_000,
+            elite_sub_stroops: 10_000_000,
+            sub_duration_secs: 60 * 24 * 60 * 60,
+        };
+        let result = client.try_update_fee_config(&new_fees);
+        assert!(result.is_ok());
+        let stored = client.get_fee_config();
+        assert_eq!(stored.contact_fee_stroops, 200_000);
+    }
+
+    // -------------------------------------------------------------------------
+    // Downgrade guard tests (issue #103)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_downgrade_elite_to_pro_before_expiry_returns_error() {
+        let (env, admin, xlm, _contract_id, client) = setup();
+        let scout = Address::generate(&env);
+        mint_token(&env, &xlm, &admin, &scout, 100_000_000);
+
+        // Subscribe at Elite
+        client.subscribe(&scout, &SubscriptionTier::Elite);
+
+        // Attempt downgrade to Pro while still active — must be rejected
+        let result = client.try_subscribe(&scout, &SubscriptionTier::Pro);
+        assert_eq!(result, Err(Ok(ScoutAccessError::SubscriptionDowngradeNotAllowed)));
+    }
+
+    #[test]
+    fn test_downgrade_elite_to_basic_before_expiry_returns_error() {
+        let (env, admin, xlm, _contract_id, client) = setup();
+        let scout = Address::generate(&env);
+        mint_token(&env, &xlm, &admin, &scout, 100_000_000);
+
+        client.subscribe(&scout, &SubscriptionTier::Elite);
+
+        let result = client.try_subscribe(&scout, &SubscriptionTier::Basic);
+        assert_eq!(result, Err(Ok(ScoutAccessError::SubscriptionDowngradeNotAllowed)));
+    }
+
+    #[test]
+    fn test_downgrade_pro_to_basic_before_expiry_returns_error() {
+        let (env, admin, xlm, _contract_id, client) = setup();
+        let scout = Address::generate(&env);
+        mint_token(&env, &xlm, &admin, &scout, 100_000_000);
+
+        client.subscribe(&scout, &SubscriptionTier::Pro);
+
+        let result = client.try_subscribe(&scout, &SubscriptionTier::Basic);
+        assert_eq!(result, Err(Ok(ScoutAccessError::SubscriptionDowngradeNotAllowed)));
+    }
+
+    #[test]
+    fn test_upgrade_basic_to_elite_before_expiry_succeeds() {
+        let (env, admin, xlm, _contract_id, client) = setup();
+        let scout = Address::generate(&env);
+        mint_token(&env, &xlm, &admin, &scout, 100_000_000);
+
+        client.subscribe(&scout, &SubscriptionTier::Basic);
+        let basic_sub = client.get_subscription(&scout);
+
+        // Upgrade to Elite — must succeed and extend expiry
+        client.subscribe(&scout, &SubscriptionTier::Elite);
+        let elite_sub = client.get_subscription(&scout);
+
+        assert_eq!(elite_sub.tier, SubscriptionTier::Elite);
+        assert!(elite_sub.expires_at >= basic_sub.expires_at);
+    }
+
+    #[test]
+    fn test_upgrade_pro_to_elite_before_expiry_succeeds() {
+        let (env, admin, xlm, _contract_id, client) = setup();
+        let scout = Address::generate(&env);
+        mint_token(&env, &xlm, &admin, &scout, 100_000_000);
+
+        client.subscribe(&scout, &SubscriptionTier::Pro);
+        client.subscribe(&scout, &SubscriptionTier::Elite);
+
+        let sub = client.get_subscription(&scout);
+        assert_eq!(sub.tier, SubscriptionTier::Elite);
+    }
+
+    #[test]
+    fn test_resubscribe_at_lower_tier_after_expiry_succeeds() {
+        let (env, admin, xlm, _contract_id, client) = setup();
+        let scout = Address::generate(&env);
+        mint_token(&env, &xlm, &admin, &scout, 100_000_000);
+
+        client.subscribe(&scout, &SubscriptionTier::Elite);
+
+        // Fast-forward past expiry (31 days)
+        env.ledger().with_mut(|l| {
+            l.timestamp += 31 * 24 * 60 * 60;
+        });
+
+        // Downgrade after expiry — must succeed
+        let result = client.try_subscribe(&scout, &SubscriptionTier::Basic);
+        assert!(result.is_ok());
+        let sub = client.get_subscription(&scout);
+        assert_eq!(sub.tier, SubscriptionTier::Basic);
+    }
+
+    #[test]
+    fn test_resubscribe_same_tier_after_expiry_succeeds() {
+        let (env, admin, xlm, _contract_id, client) = setup();
+        let scout = Address::generate(&env);
+        mint_token(&env, &xlm, &admin, &scout, 100_000_000);
+
+        client.subscribe(&scout, &SubscriptionTier::Pro);
+
+        env.ledger().with_mut(|l| {
+            l.timestamp += 31 * 24 * 60 * 60;
+        });
+
+        let result = client.try_subscribe(&scout, &SubscriptionTier::Pro);
+        assert!(result.is_ok());
     }
 }

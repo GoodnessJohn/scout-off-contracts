@@ -10,6 +10,9 @@ use soroban_sdk::{contract, contractimpl, Address, Env, Vec};
 const INSTANCE_TTL_MIN: u32 = 100;
 const INSTANCE_TTL_MAX: u32 = 500;
 
+const PERSISTENT_TTL_MIN: u32 = 500;
+const PERSISTENT_TTL_MAX: u32 = 2000;
+
 #[contract]
 pub struct ProgressContract;
 
@@ -163,7 +166,11 @@ impl ProgressContract {
         env.storage()
             .persistent()
             .get(&DataKey::HistoryEntry(player_id, index))
-            .ok_or(ProgressError::PlayerNotFound)
+            .ok_or(ProgressError::PlayerNotFound)?;
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::HistoryEntry(player_id, index), PERSISTENT_TTL_MIN, PERSISTENT_TTL_MAX);
+        Ok(entry)
     }
 
     /// Return all history entries for a player in chronological order (index 1..=N).
