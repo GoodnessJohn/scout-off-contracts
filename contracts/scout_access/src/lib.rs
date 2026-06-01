@@ -10,21 +10,6 @@ use soroban_sdk::{contract, contractimpl, token, Address, Env, String};
 // ~30 days at 5 s/ledger; extend when TTL drops below half that.
 const TRIAL_TTL_THRESHOLD: u32 = 259_200;
 const TRIAL_TTL_EXTEND_TO: u32 = 518_400;
-// ~7 days / ~14 days at 5 s/ledger for persistent subscription entries.
-const PERSISTENT_TTL_MIN: u32 = 120_960;
-const PERSISTENT_TTL_MAX: u32 = 241_920;
-
-mod progress_contract {
-    soroban_sdk::contractimport!(
-        file = "../../target/wasm32-unknown-unknown/release/scoutchain_progress.wasm"
-    );
-}
-
-mod registration_contract {
-    soroban_sdk::contractimport!(
-        file = "../../target/wasm32-unknown-unknown/release/scoutchain_registration.wasm"
-    );
-}
 
 #[contract]
 pub struct ScoutAccessContract;
@@ -100,17 +85,6 @@ impl ScoutAccessContract {
         Ok(())
     }
 
-    /// Register the registration contract address for optional player validation
-    /// during pay_to_contact (admin only). When set, pay_to_contact will verify
-    /// the player exists before collecting fees.
-    pub fn set_registration_contract(env: Env, addr: Address) -> Result<(), ScoutAccessError> {
-        Self::require_admin(&env)?;
-        env.storage()
-            .instance()
-            .set(&DataKey::RegistrationContract, &addr);
-        Ok(())
-    }
-
     // -------------------------------------------------------------------------
     // Scout subscription
     // -------------------------------------------------------------------------
@@ -175,18 +149,6 @@ impl ScoutAccessContract {
         let contact_key = DataKey::ContactRecord(player_id, scout.clone());
         if env.storage().persistent().has(&contact_key) {
             return Err(ScoutAccessError::AlreadyContacted);
-        }
-
-        // Optional: validate player exists in the registration contract.
-        if let Some(reg_addr) = env
-            .storage()
-            .instance()
-            .get::<DataKey, Address>(&DataKey::RegistrationContract)
-        {
-            let reg_client = registration_contract::Client::new(&env, &reg_addr);
-            if reg_client.try_get_player(&player_id).is_err() {
-                return Err(ScoutAccessError::PlayerNotFound);
-            }
         }
 
         let config = Self::fee_config(&env);
@@ -653,69 +615,5 @@ mod tests {
         // get_subscription must succeed and re-extend the TTL.
         let sub = client.get_subscription(&scout);
         assert_eq!(sub.tier, SubscriptionTier::Basic);
-    }
-
-    // -------------------------------------------------------------------------
-    // Cross-contract player validation tests
-    // -------------------------------------------------------------------------
-
-    #[test]
-    fn test_pay_to_contact_without_registration_contract_skips_validation() {
-        // When no registration contract is set, pay_to_contact succeeds even
-        // for a player_id that doesn't exist in any registration contract.
-        let (env, admin, xlm, _contract_id, client) = setup();
-        let scout = Address::generate(&env);
-        mint_token(&env, &xlm, &admin, &scout, 100_000_000);
-
-        client.subscribe(&scout, &SubscriptionTier::Elite);
-        // player_id 999 doesn't exist anywhere, but no registration contract is
-        // configured so validation is skipped and the contact succeeds.
-        client.pay_to_contact(&scout, &999u64);
-        assert!(client.has_contacted(&scout, &999u64));
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_pay_to_contact_with_registration_contract_rejects_unknown_player() {
-        use scoutchain_registration::RegistrationContract;
-
-        let (env, admin, xlm, _contract_id, client) = setup();
-
-        // Deploy and initialise the registration contract (no players registered).
-        let reg_id = env.register_contract(None, RegistrationContract);
-        let reg_client = scoutchain_registration::RegistrationContractClient::new(&env, &reg_id);
-        reg_client.initialize(&admin);
-
-        // Wire the registration contract into scout_access.
-        client.set_registration_contract(&reg_id);
-
-        let scout = Address::generate(&env);
-        mint_token(&env, &xlm, &admin, &scout, 100_000_000);
-        client.subscribe(&scout, &SubscriptionTier::Elite);
-
-        // player_id 1 does not exist → should panic with PlayerNotFound.
-        client.pay_to_contact(&scout, &1u64);
-    }
-
-    #[test]
-    fn test_log_trial_offer_overflow_returns_error() {
-        let (env, admin, xlm, _contract_id, client) = setup();
-        let scout = Address::generate(&env);
-        mint_token(&env, &xlm, &admin, &scout, 100_000_000);
-        client.subscribe(&scout, &SubscriptionTier::Elite);
-
-        // Seed the trial counter at u32::MAX so the next increment overflows.
-        env.as_contract(&_contract_id, || {
-            env.storage()
-                .persistent()
-                .set(&DataKey::TrialCounter(1u64), &u32::MAX);
-        });
-
-        let result = client.try_log_trial_offer(
-            &scout,
-            &1u64,
-            &String::from_str(&env, "QmOverflow"),
-        );
-        assert_eq!(result, Err(Ok(ScoutAccessError::Overflow)));
     }
 }

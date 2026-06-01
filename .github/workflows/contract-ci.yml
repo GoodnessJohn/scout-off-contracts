@@ -31,11 +31,11 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Build WASM (release)
-        run: cargo build --workspace --target wasm32-unknown-unknown --release
-
       - name: Run tests
         run: cargo test --workspace
+
+      - name: Build WASM (release)
+        run: cargo build --workspace --target wasm32-unknown-unknown --release
 
   lint:
     name: Lint
