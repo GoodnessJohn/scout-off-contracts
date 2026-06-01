@@ -259,12 +259,6 @@ impl ScoutAccessContract {
                 .ok_or(ScoutAccessError::Overflow)?,
             subscribed_at: now,
         };
-        env.storage()
-            .persistent()
-            .set(&DataKey::Subscription(scout.clone()), &sub);
-        env.storage()
-            .persistent()
-            .extend_ttl(&DataKey::Subscription(scout.clone()), PERSISTENT_TTL_MIN, PERSISTENT_TTL_MAX);
 
         events::scout_subscribed(&env, &scout, &tier, fee);
         Ok(())
@@ -492,11 +486,8 @@ impl ScoutAccessContract {
             .expect("fee config not set")
     }
 
-    fn xlm_token(env: &Env) -> Address {
-        env.storage()
-            .instance()
-            .get(&DataKey::XlmToken)
-            .expect("xlm token not set")
+    fn get_token(env: &Env) -> Address {
+        env.storage().instance().get(&DataKey::XlmToken).unwrap()
     }
 
     fn accumulate_fee(env: &Env, amount: i128) -> Result<(), ScoutAccessError> {
