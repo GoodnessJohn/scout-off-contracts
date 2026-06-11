@@ -1,5 +1,5 @@
 use soroban_sdk::{Address, Env, Symbol};
-use crate::types::{FeeConfig, SubscriptionTier};
+use crate::types::SubscriptionTier;
 
 pub fn contract_initialized(env: &Env, admin: &Address) {
     env.events().publish(
@@ -8,7 +8,7 @@ pub fn contract_initialized(env: &Env, admin: &Address) {
     );
 }
 
-pub fn scout_subscribed(env: &Env, scout: &Address, tier: &SubscriptionTier) {
+pub fn scout_subscribed(env: &Env, scout: &Address, tier: &SubscriptionTier, fee_paid: i128) {
     env.events().publish(
         (Symbol::new(env, "scout_subscribed"), scout.clone()),
         (tier.clone(), fee_paid),

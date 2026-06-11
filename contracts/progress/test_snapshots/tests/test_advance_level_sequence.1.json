@@ -164,6 +164,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "ledger_sequence"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "milestone_ref"
                     },
                     "val": {
@@ -251,6 +259,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "ledger_sequence"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "milestone_ref"
                     },
                     "val": {
@@ -336,6 +352,14 @@
               "durability": "persistent",
               "val": {
                 "map": [
+                  {
+                    "key": {
+                      "symbol": "ledger_sequence"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
                   {
                     "key": {
                       "symbol": "milestone_ref"

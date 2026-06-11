@@ -80,7 +80,7 @@ impl ProgressContract {
             target_level.clone(),
             admin,
             0,
-        );
+        )?;
         env.storage()
             .persistent()
             .set(&DataKey::PlayerLevel(player_id), &target_level);
@@ -125,16 +125,16 @@ impl ProgressContract {
         Self::record_progress_entry(
             &env,
             player_id,
-            current,
+            current.clone(),
             new_level.clone(),
             caller.clone(),
             milestone_ref,
-        );
+        )?;
         env.storage()
             .persistent()
             .set(&DataKey::PlayerLevel(player_id), &new_level);
 
-        events::progress_updated(&env, player_id, &new_level, &caller, milestone_ref);
+        events::progress_updated(&env, player_id, &current, &new_level, &caller, milestone_ref);
         Ok(new_level)
     }
 
@@ -142,11 +142,11 @@ impl ProgressContract {
     // Queries
     // -------------------------------------------------------------------------
 
-    pub fn get_level(env: Env, player_id: u64) -> Result<ProgressLevel, ProgressError> {
+    pub fn get_level(env: Env, player_id: u64) -> ProgressLevel {
         env.storage()
             .persistent()
             .get(&DataKey::PlayerLevel(player_id))
-            .ok_or(ProgressError::PlayerNotFound)
+            .unwrap_or(ProgressLevel::Unverified)
     }
 
     pub fn get_history_count(env: Env, player_id: u64) -> u32 {
@@ -163,7 +163,8 @@ impl ProgressContract {
         index: u32,
     ) -> Result<ProgressEntry, ProgressError> {
         Self::bump_instance_ttl(&env);
-        env.storage()
+        let entry: ProgressEntry = env
+            .storage()
             .persistent()
             .get(&DataKey::HistoryEntry(player_id, index))
             .ok_or(ProgressError::PlayerNotFound)?;
@@ -201,9 +202,9 @@ impl ProgressContract {
         entries
     }
 
-    pub fn health(env: Env) -> bool {
+    pub fn health(env: Env) -> ContractHealth {
         Self::bump_instance_ttl(&env);
-        env.storage()
+        let initialized = env.storage()
             .instance()
             .get::<DataKey, bool>(&DataKey::Initialized)
             .unwrap_or(false);
@@ -238,10 +239,10 @@ impl ProgressContract {
         new_level: ProgressLevel,
         updated_by: Address,
         milestone_ref: u32,
-    ) {
+    ) -> Result<(), ProgressError> {
         let history_key = DataKey::HistoryCounter(player_id);
         let index: u32 = env.storage().persistent().get(&history_key).unwrap_or(0u32);
-        let next_index = index.checked_add(1).expect("overflow");
+        let next_index = index.checked_add(1).ok_or(ProgressError::Overflow)?;
 
         let entry = ProgressEntry {
             player_id,
@@ -250,12 +251,14 @@ impl ProgressContract {
             updated_by,
             updated_at: env.ledger().timestamp(),
             milestone_ref,
+            ledger_sequence: env.ledger().sequence(),
         };
 
         env.storage()
             .persistent()
             .set(&DataKey::HistoryEntry(player_id, next_index), &entry);
         env.storage().persistent().set(&history_key, &next_index);
+        Ok(())
     }
 
     fn require_initialized(env: &Env) -> Result<(), ProgressError> {

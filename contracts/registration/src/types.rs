@@ -60,4 +60,6 @@ pub enum DataKey {
     ScoutByWallet(Address),
     /// Index of all player IDs for efficient filtering and iteration
     PlayerIndex,
+    /// Address of the progress contract allowed to call set_player_level
+    ProgressContract,
 }

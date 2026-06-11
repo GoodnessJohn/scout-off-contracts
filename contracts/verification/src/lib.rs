@@ -18,7 +18,7 @@ mod types;
 use errors::VerificationError;
 use types::{ContractHealth, DataKey, Milestone, Validator, ValidatorStatus};
 
-use soroban_sdk::{contract, contractimpl, Address, Env, String};
+use soroban_sdk::{contract, contractimpl, Address, Env, String, Vec};
 
 const MAX_CREDENTIALS_LEN: u32 = 256;
 
@@ -446,7 +446,6 @@ mod tests {
 
     fn setup() -> (Env, VerificationContractClient<'static>) {
         let env = Env::default();
-        env.ledger().with_mut(|l| l.sequence_number = 1);
         env.mock_all_auths();
         env.ledger().with_mut(|l| {
             l.sequence_number = 1;
@@ -837,31 +836,29 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(env.events().all(), soroban_sdk::vec![&env]);
     }
-}
-#[test]
-fn test_get_validators_includes_revoked() {
-    let (env, client) = setup();
-    let admin = Address::generate(&env);
-    client.initialize(&admin);
 
-    // Generate 3 different validator wallets
-    let v1 = Address::generate(&env);
-    let v2 = Address::generate(&env);
-    let v3 = Address::generate(&env);
+    #[test]
+    fn test_get_validators_includes_revoked() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
 
-    // 1. Register 3 validators
-    client.register_validator(&v1, &String::from_str(&env, "Credentials 1"));
-    client.register_validator(&v2, &String::from_str(&env, "Credentials 2"));
-    client.register_validator(&v3, &String::from_str(&env, "Credentials 3"));
+        let v1 = Address::generate(&env);
+        let v2 = Address::generate(&env);
+        let v3 = Address::generate(&env);
 
-    // 2. Revoke 1 validator
-    client.revoke_validator(&v2);
+        client.register_validator(&v1, &String::from_str(&env, "Credentials 1"));
+        client.register_validator(&v2, &String::from_str(&env, "Credentials 2"));
+        client.register_validator(&v3, &String::from_str(&env, "Credentials 3"));
 
-    // 3. Assert all 3 are still returned by get_validators query
-    let validators = client.get_validators();
-    assert_eq!(validators.len(), 3);
-    assert!(validators.contains(&v1));
-    assert!(validators.contains(&v2));
-    assert!(validators.contains(&v3));
+        let reason: Option<String> = None;
+        client.revoke_validator(&v2, &reason);
+
+        let validators = client.get_validators();
+        assert_eq!(validators.len(), 3);
+        assert!(validators.contains(&v1));
+        assert!(validators.contains(&v2));
+        assert!(validators.contains(&v3));
+    }
 }
 
