@@ -182,7 +182,14 @@ impl ScoutAccessContract {
     // Scout subscription
     // -------------------------------------------------------------------------
 
-    /// Purchase a scout subscription. Scout must pre-approve the XLM transfer.
+    /// Purchase a scout subscription.
+    ///
+    /// Payment flow:
+    /// 1. Transfer XLM from scout to contract via `token::Client::transfer`.
+    /// 2. Add fee to `AccumulatedFees` in instance storage.
+    /// 3. Write `Subscription` record to persistent storage.
+    ///
+    /// Scout must pre-approve the XLM transfer. Downgrades before expiry are rejected.
     pub fn subscribe(
         env: Env,
         scout: Address,
@@ -248,7 +255,13 @@ impl ScoutAccessContract {
     // -------------------------------------------------------------------------
 
     /// Pay a micro-fee to unlock a player's contact details.
-    /// Scout must have an active subscription.
+    ///
+    /// Payment flow:
+    /// 1. Transfer `contact_fee_stroops` XLM from scout to contract via `token::Client::transfer`.
+    /// 2. Add fee to `AccumulatedFees` in instance storage.
+    /// 3. Write contact record to persistent storage (prevents duplicate contacts).
+    ///
+    /// Scout must have an active, non-expired subscription.
     pub fn pay_to_contact(
         env: Env,
         scout: Address,
