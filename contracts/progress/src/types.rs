@@ -47,4 +47,7 @@ pub enum DataKey {
     /// The `Address` of the registration contract. Only this address is
     /// permitted to call `initialize_player`. Set by `set_registration_contract`.
     RegistrationContract,
+    /// Admin-configurable ring-buffer depth for per-player history.
+    /// When absent, [`crate::constants::DEFAULT_HISTORY_MAX_DEPTH`] is used.
+    HistoryMaxDepth,
 }

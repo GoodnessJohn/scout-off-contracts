@@ -1,8 +1,11 @@
 #![no_std]
+mod constants;
 mod errors;
 mod events;
+mod storage;
 mod types;
 
+use constants::MAX_HISTORY_DEPTH;
 use errors::ProgressError;
 use types::{ContractHealth, DataKey, ProgressEntry, ProgressLevel};
 
@@ -19,9 +22,9 @@ pub struct ProgressContract;
 
 #[contractimpl]
 impl ProgressContract {
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
     // Admin
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
     pub fn initialize(env: Env, admin: Address) -> Result<(), ProgressError> {
         Self::bump_instance_ttl(&env);
@@ -90,9 +93,41 @@ impl ProgressContract {
         Ok(())
     }
 
-    // -------------------------------------------------------------------------
+    /// Set the history ring-buffer depth used for all players.
+    ///
+    /// Requires admin authentication.  Rejects `depth == 0` and
+    /// `depth > MAX_HISTORY_DEPTH` with [`ProgressError::InvalidHistoryDepth`].
+    ///
+    /// # Lazy truncation on depth decrease
+    ///
+    /// When the depth is **reduced** (e.g. from 20 → 5), entries that now fall
+    /// outside the active window are **not retroactively deleted**.  They remain
+    /// in persistent storage until the next `advance_level` or
+    /// `reset_player_level` call for that player triggers the eviction loop in
+    /// [`storage::push_history_entry`].  Subsequent writes will converge the
+    /// ring to the new depth one entry at a time.  This is intentional: a
+    /// retroactive bulk-delete would require a variable-length loop whose gas
+    /// cost is unbounded for large histories.
+    pub fn set_history_max_depth(env: Env, depth: u32) -> Result<(), ProgressError> {
+        Self::bump_instance_ttl(&env);
+        Self::require_admin(&env)?;
+        if depth == 0 || depth > MAX_HISTORY_DEPTH {
+            return Err(ProgressError::InvalidHistoryDepth);
+        }
+        storage::set_history_max_depth(&env, depth);
+        Ok(())
+    }
+
+    /// Return the currently configured history ring-buffer depth.
+    ///
+    /// Returns [`DEFAULT_HISTORY_MAX_DEPTH`] when no admin value has been set.
+    pub fn get_history_max_depth(env: Env) -> u32 {
+        storage::get_history_max_depth(&env)
+    }
+
+    // ---------------------------------------------------------------------------
     // Progress updates
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
     /// Advance a player's progress level by one tier.
     /// Caller must be an authorized validator (or scout for Level 3).
@@ -112,9 +147,6 @@ impl ProgressContract {
             .instance()
             .get::<DataKey, Address>(&DataKey::VerificationContract)
         {
-            // When configured, only the verification contract may invoke this
-            // function (directly or via cross-contract call). The `caller`
-            // argument still records the validator or scout that triggered it.
             verification_contract.require_auth();
         } else {
             caller.require_auth();
@@ -146,9 +178,9 @@ impl ProgressContract {
         Ok(new_level)
     }
 
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
     // Queries
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
     pub fn get_level(env: Env, player_id: u64) -> ProgressLevel {
         env.storage()
@@ -230,9 +262,9 @@ impl ProgressContract {
         }
     }
 
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
     // Internal helpers
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
 
     fn bump_instance_ttl(env: &Env) {
         env.storage()
@@ -255,10 +287,6 @@ impl ProgressContract {
         updated_by: Address,
         milestone_ref: u32,
     ) -> Result<(), ProgressError> {
-        let history_key = DataKey::HistoryCounter(player_id);
-        let index: u32 = env.storage().persistent().get(&history_key).unwrap_or(0u32);
-        let next_index = index.checked_add(1).ok_or(ProgressError::Overflow)?;
-
         let entry = ProgressEntry {
             player_id,
             old_level,
@@ -268,12 +296,7 @@ impl ProgressContract {
             milestone_ref,
             ledger_sequence: env.ledger().sequence(),
         };
-
-        env.storage()
-            .persistent()
-            .set(&DataKey::HistoryEntry(player_id, next_index), &entry);
-        env.storage().persistent().set(&history_key, &next_index);
-        Ok(())
+        storage::push_history_entry(env, player_id, &entry)
     }
 
     fn require_initialized(env: &Env) -> Result<(), ProgressError> {
@@ -317,11 +340,13 @@ impl ProgressContract {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::constants::DEFAULT_HISTORY_MAX_DEPTH;
     use soroban_sdk::{
         testutils::{Address as _, Events as _},
         vec, Env, IntoVal, Symbol,
     };
 
+    #[allow(deprecated)]
     fn setup() -> (Env, ProgressContractClient<'static>) {
         let env = Env::default();
         env.mock_all_auths();
@@ -337,17 +362,11 @@ mod tests {
         client.initialize(&admin);
         let validator = Address::generate(&env);
 
-        // Player 1: advance to Level 2 (PerformanceMilestones)
         client.advance_level(&validator, &1u64, &1u32);
         client.advance_level(&validator, &1u64, &2u32);
-
-        // Player 2: advance to Level 1 (VerifiedIdentity)
         client.advance_level(&validator, &2u64, &3u32);
 
-        assert_eq!(
-            client.get_level(&1u64),
-            ProgressLevel::PerformanceMilestones
-        );
+        assert_eq!(client.get_level(&1u64), ProgressLevel::PerformanceMilestones);
         assert_eq!(client.get_level(&2u64), ProgressLevel::VerifiedIdentity);
         assert_eq!(client.get_history_count(&1u64), 2);
         assert_eq!(client.get_history_count(&2u64), 1);
@@ -362,15 +381,12 @@ mod tests {
         let validator = Address::generate(&env);
         let player_id = 1u64;
 
-        // Unverified → VerifiedIdentity
         let l1 = client.advance_level(&validator, &player_id, &1u32);
         assert_eq!(l1, ProgressLevel::VerifiedIdentity);
 
-        // VerifiedIdentity → PerformanceMilestones
         let l2 = client.advance_level(&validator, &player_id, &2u32);
         assert_eq!(l2, ProgressLevel::PerformanceMilestones);
 
-        // PerformanceMilestones → EliteTier
         let l3 = client.advance_level(&validator, &player_id, &3u32);
         assert_eq!(l3, ProgressLevel::EliteTier);
 
@@ -387,12 +403,9 @@ mod tests {
         let player_id = 42u64;
         let milestone = 7u32;
 
-        // Advance once: Unverified → VerifiedIdentity
         client.advance_level(&validator, &player_id, &milestone);
 
-        // History index starts at 1
         let entry = client.get_history_entry(&player_id, &1u32);
-
         assert_eq!(entry.old_level, ProgressLevel::Unverified);
         assert_eq!(entry.new_level, ProgressLevel::VerifiedIdentity);
         assert_eq!(entry.updated_by, validator);
@@ -400,10 +413,10 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_advance_level_not_initialized() {
         let env = Env::default();
         env.mock_all_auths();
-        // Register the contract but deliberately skip initialize()
         let id = env.register_contract(None, ProgressContract);
         let client = ProgressContractClient::new(&env, &id);
 
@@ -422,7 +435,6 @@ mod tests {
         let validator = Address::generate(&env);
         let player_id = 10u64;
 
-        // Advance through all three tiers
         client.advance_level(&validator, &player_id, &1u32);
         client.advance_level(&validator, &player_id, &2u32);
         client.advance_level(&validator, &player_id, &3u32);
@@ -430,31 +442,15 @@ mod tests {
         let history = client.get_progress_history(&player_id);
 
         assert_eq!(history.len(), 3);
-
-        // Entry 1: Unverified → VerifiedIdentity
         assert_eq!(history.get(0).unwrap().old_level, ProgressLevel::Unverified);
-        assert_eq!(
-            history.get(0).unwrap().new_level,
-            ProgressLevel::VerifiedIdentity
-        );
+        assert_eq!(history.get(0).unwrap().new_level, ProgressLevel::VerifiedIdentity);
         assert_eq!(history.get(0).unwrap().milestone_ref, 1u32);
 
-        // Entry 2: VerifiedIdentity → PerformanceMilestones
-        assert_eq!(
-            history.get(1).unwrap().old_level,
-            ProgressLevel::VerifiedIdentity
-        );
-        assert_eq!(
-            history.get(1).unwrap().new_level,
-            ProgressLevel::PerformanceMilestones
-        );
+        assert_eq!(history.get(1).unwrap().old_level, ProgressLevel::VerifiedIdentity);
+        assert_eq!(history.get(1).unwrap().new_level, ProgressLevel::PerformanceMilestones);
         assert_eq!(history.get(1).unwrap().milestone_ref, 2u32);
 
-        // Entry 3: PerformanceMilestones → EliteTier
-        assert_eq!(
-            history.get(2).unwrap().old_level,
-            ProgressLevel::PerformanceMilestones
-        );
+        assert_eq!(history.get(2).unwrap().old_level, ProgressLevel::PerformanceMilestones);
         assert_eq!(history.get(2).unwrap().new_level, ProgressLevel::EliteTier);
         assert_eq!(history.get(2).unwrap().milestone_ref, 3u32);
     }
@@ -465,7 +461,6 @@ mod tests {
         let admin = Address::generate(&env);
         client.initialize(&admin);
 
-        // Player 999 has never had advance_level called
         let history = client.get_progress_history(&999u64);
         assert_eq!(history.len(), 0);
     }
@@ -479,14 +474,8 @@ mod tests {
         let validator = Address::generate(&env);
         let player_id = 5u64;
 
-        // Advance once: Unverified → VerifiedIdentity
         client.advance_level(&validator, &player_id, &1u32);
 
-        // env.events().all() returns ContractEvents which compares against
-        // soroban_sdk::Vec<(Address, Vec<Val>, Val)>:
-        //   - Address  : the contract that emitted the event
-        //   - Vec<Val> : topics  — (Symbol("progress_updated"), updated_by)
-        //   - Val      : data    — (player_id, old_level, new_level)
         let contract_id = client.address.clone();
         assert_eq!(
             env.events().all(),
@@ -502,7 +491,7 @@ mod tests {
                     (
                         player_id,
                         ProgressLevel::Unverified,
-                        ProgressLevel::VerifiedIdentity
+                        ProgressLevel::VerifiedIdentity,
                     )
                         .into_val(&env),
                 )
@@ -523,7 +512,6 @@ mod tests {
         client.advance_level(&validator, &player_id, &1u32);
         client.advance_level(&validator, &player_id, &2u32);
         client.advance_level(&validator, &player_id, &3u32);
-        // This should panic — already at EliteTier
         client.advance_level(&validator, &player_id, &4u32);
     }
 
@@ -534,7 +522,6 @@ mod tests {
         client.initialize(&admin);
 
         let new_admin = Address::generate(&env);
-        // Should not panic — current admin auth is satisfied
         client.transfer_admin(&new_admin);
     }
 
@@ -545,7 +532,6 @@ mod tests {
         let admin = Address::generate(&env);
         client.initialize(&admin);
 
-        // Clear all mocks — no auth satisfied, so admin check fails
         env.mock_auths(&[]);
         client.transfer_admin(&Address::generate(&env));
     }
@@ -559,26 +545,17 @@ mod tests {
         let validator = Address::generate(&env);
         let player_id = 42u64;
 
-        // --- pause ---
         client.pause_contract();
 
-        // advance_level must be rejected with ContractPaused while paused
         let err = client
             .try_advance_level(&validator, &player_id, &1u32)
             .expect_err("expected an error while paused");
-        assert_eq!(
-            err.unwrap(),
-            ProgressError::ContractPaused,
-            "expected ContractPaused error"
-        );
+        assert_eq!(err.unwrap(), ProgressError::ContractPaused, "expected ContractPaused error");
 
-        // player level must be unchanged
         assert_eq!(client.get_level(&player_id), ProgressLevel::Unverified);
 
-        // --- unpause ---
         client.unpause_contract();
 
-        // advance_level must now succeed
         let new_level = client.advance_level(&validator, &player_id, &1u32);
         assert_eq!(new_level, ProgressLevel::VerifiedIdentity);
     }
@@ -593,7 +570,6 @@ mod tests {
         let new_admin = Address::generate(&env);
         client.transfer_admin(&new_admin);
 
-        // Clear mocks — old admin auth no longer stored, so pause must fail
         env.mock_auths(&[]);
         client.pause_contract();
     }
@@ -668,5 +644,132 @@ mod tests {
         });
 
         client.advance_level(&caller, &player_id, &1u32);
+    }
+
+    // ---------------------------------------------------------------------------
+    // Configurable history depth tests (Issue #8)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn test_default_history_depth_is_10() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+
+        assert_eq!(
+            client.get_history_max_depth(),
+            DEFAULT_HISTORY_MAX_DEPTH,
+            "default depth must equal DEFAULT_HISTORY_MAX_DEPTH (10)"
+        );
+    }
+
+    #[test]
+    fn test_set_history_max_depth_increases_ring() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+
+        // Set depth to 20 then write 15 entries.
+        client.set_history_max_depth(&20u32);
+        assert_eq!(client.get_history_max_depth(), 20u32);
+
+        let validator = Address::generate(&env);
+        let player_id = 50u64;
+
+        // Advance through all 3 tiers then reset repeatedly to generate entries.
+        // Use reset_player_level to keep writing history beyond the 3 natural tiers.
+        client.advance_level(&validator, &player_id, &1u32); // 1
+        client.advance_level(&validator, &player_id, &2u32); // 2
+        client.advance_level(&validator, &player_id, &3u32); // 3
+
+        for _ in 0..12 {
+            client.reset_player_level(&player_id, &ProgressLevel::Unverified);
+        }
+        // Total entries written: 3 advances + 12 resets = 15
+        assert_eq!(client.get_history_count(&player_id), 15);
+
+        // With depth=20 none should have been evicted: all 15 must be readable.
+        for i in 1u32..=15u32 {
+            // Should not panic.
+            let _ = client.get_history_entry(&player_id, &i);
+        }
+    }
+
+    #[test]
+    fn test_set_history_max_depth_decreases_ring_on_next_write() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+
+        let validator = Address::generate(&env);
+        let player_id = 60u64;
+
+        // Write 5 entries at default depth (10): indices 1..=5.
+        client.advance_level(&validator, &player_id, &1u32); // 1
+        client.advance_level(&validator, &player_id, &2u32); // 2
+        client.advance_level(&validator, &player_id, &3u32); // 3
+        client.reset_player_level(&player_id, &ProgressLevel::Unverified); // 4
+        client.reset_player_level(&player_id, &ProgressLevel::Unverified); // 5
+
+        // Reduce depth to 3.
+        client.set_history_max_depth(&3u32);
+
+        // One more write (entry 6) should evict entry 3 (6 - 3 = 3).
+        client.reset_player_level(&player_id, &ProgressLevel::Unverified); // 6
+
+        // Entry 3 must now be gone.
+        let evicted = client.try_get_history_entry(&player_id, &3u32);
+        assert!(evicted.is_err(), "entry 3 should have been evicted");
+
+        // The three most-recent entries (4, 5, 6) must still be present.
+        let _ = client.get_history_entry(&player_id, &4u32);
+        let _ = client.get_history_entry(&player_id, &5u32);
+        let _ = client.get_history_entry(&player_id, &6u32);
+
+        // history_count still reflects the monotonic counter (6).
+        assert_eq!(client.get_history_count(&player_id), 6);
+    }
+
+    #[test]
+    fn test_history_depth_zero_rejected() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+
+        let result = client.try_set_history_max_depth(&0u32);
+        assert_eq!(result, Err(Ok(ProgressError::InvalidHistoryDepth)));
+    }
+
+    #[test]
+    fn test_history_depth_above_ceiling_rejected() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+
+        let result = client.try_set_history_max_depth(&51u32);
+        assert_eq!(result, Err(Ok(ProgressError::InvalidHistoryDepth)));
+    }
+
+    #[test]
+    fn test_history_depth_at_ceiling_accepted() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+
+        // MAX_HISTORY_DEPTH = 50 must be accepted.
+        let result = client.try_set_history_max_depth(&MAX_HISTORY_DEPTH);
+        assert!(result.is_ok(), "depth equal to MAX_HISTORY_DEPTH must be accepted");
+        assert_eq!(client.get_history_max_depth(), MAX_HISTORY_DEPTH);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_set_history_max_depth_requires_admin() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+
+        env.mock_auths(&[]);
+        client.set_history_max_depth(&20u32);
     }
 }

@@ -135,6 +135,8 @@ Progress levels are configured per player and enforced on-chain by authorized va
 - `update_fee_config(fee_config)` — Adjust subscription and contact fee rates (admin only)
 - `withdraw_fees(to)` — Withdraw accumulated platform fees (admin only)
 - `pause_contract()` / `unpause_contract()` — Emergency circuit breaker (admin only)
+- `set_history_max_depth(depth)` — Set the per-player history ring-buffer depth (1–50, admin only). Existing out-of-window entries are lazily evicted on the next write.
+- `get_history_max_depth()` — Return the currently configured depth (default: 10)
 
 ### Query Functions
 

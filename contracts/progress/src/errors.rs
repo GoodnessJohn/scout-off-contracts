@@ -20,4 +20,6 @@ pub enum ProgressError {
     PlayerNotFound = 7,
     /// History counter overflowed the maximum u32 value.
     Overflow = 8,
+    /// Returned when a history depth of 0 or above MAX_HISTORY_DEPTH is requested.
+    InvalidHistoryDepth = 13,
 }
