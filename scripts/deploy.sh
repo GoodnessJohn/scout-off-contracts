@@ -11,6 +11,23 @@ if [[ -z "$DEPLOYER" ]]; then
   exit 1
 fi
 
+# Validate mainnet config before proceeding
+if [[ "$NETWORK" == "mainnet" ]]; then
+  echo "⚠️  MAINNET DEPLOYMENT DETECTED ⚠️"
+  echo ""
+  echo "Checking config/mainnet.json for placeholder values..."
+  if grep -q "FILL_IN_BEFORE_USE\|YOUR_API_KEY" config/mainnet.json; then
+    echo "ERROR: config/mainnet.json contains placeholder values (FILL_IN_BEFORE_USE or YOUR_API_KEY)"
+    echo "Please update the file with real values before deploying to mainnet:"
+    echo "  - Replace YOUR_API_KEY with your actual Validation Cloud API key (or another RPC provider)"
+    echo "  - Verify xlm_token_address is correct for mainnet"
+    echo ""
+    exit 1
+  fi
+  echo "✓ config/mainnet.json validated — no placeholder values found."
+  echo ""
+fi
+
 WASM_DIR="target/wasm32-unknown-unknown/release"
 
 echo "==> Building contracts..."

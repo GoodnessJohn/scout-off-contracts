@@ -284,7 +284,10 @@ scoutchain-contracts/
 
 ```bash
 cp .env.example .env
-# Fill in DEPLOYER_SECRET, ADMIN_ADDRESS, XLM_TOKEN_ADDRESS
+# Fill in all six environment variables:
+#   DEPLOYER_SECRET, ADMIN_ADDRESS, XLM_TOKEN_ADDRESS,
+#   STELLAR_NETWORK, HORIZON_URL, SOROBAN_RPC_URL
+# For testnet, the defaults in .env.example are ready to use.
 ./scripts/setup-testnet.sh
 ```
 
@@ -306,7 +309,7 @@ rustup target add wasm32-unknown-unknown
 
 ```bash
 cp .env.example .env
-# Fill in DEPLOYER_SECRET, ADMIN_ADDRESS, XLM_TOKEN_ADDRESS
+# Fill in all six required environment variables (see Configuration section above)
 ```
 
 #### 3. Build and deploy
@@ -415,18 +418,16 @@ psql $DATABASE_URL -f migrations/001_initial_schema.sql
 
 ## Configuration
 
-Copy `.env.example` to `.env` and fill in the three required values before running any script:
+Copy `.env.example` to `.env` and fill in all six required values before running any script:
 
-| Variable | Description |
-|----------|-------------|
-| `DEPLOYER_SECRET` | Stellar secret key used to deploy and invoke contracts |
-| `ADMIN_ADDRESS` | Stellar G-address that will own all four contracts |
-| `XLM_TOKEN_ADDRESS` | Native XLM token contract address on the target network |
-| `STELLAR_NETWORK` | `testnet` or `mainnet` (default: `testnet`) |
-| `HORIZON_URL` | Stellar Horizon endpoint |
-| `SOROBAN_RPC_URL` | Soroban RPC endpoint |
-
-Network-specific addresses are in `config/testnet.json` and `config/mainnet.json`.
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `DEPLOYER_SECRET` | ✅ | Stellar secret key (S...) used to deploy and invoke contracts. Must have sufficient XLM balance. **Keep secret.** |
+| `ADMIN_ADDRESS` | ✅ | Stellar G-address that will own and initialize all four contracts. Receives admin privileges. |
+| `XLM_TOKEN_ADDRESS` | ✅ | Native XLM token contract address. **Network-specific** — must match your target network (testnet vs mainnet). |
+| `STELLAR_NETWORK` | ✅ | Target network: `testnet` or `mainnet` (default: `testnet`) |
+| `HORIZON_URL` | ✅ | Stellar Horizon API endpoint for querying account and transaction data. |
+| `SOROBAN_RPC_URL` | ✅ | Soroban RPC endpoint for contract deployment and invocation. |
 
 After deployment, contract IDs are written to `.env.contracts` and must be copied into the backend and frontend repos:
 
@@ -436,6 +437,17 @@ VERIFICATION_CONTRACT_ID=
 PROGRESS_CONTRACT_ID=
 SCOUT_ACCESS_CONTRACT_ID=
 ```
+
+### Mainnet Safety
+
+If deploying to **mainnet**, verify the following **before running** `./scripts/deploy.sh mainnet`:
+
+1. **Update `config/mainnet.json`**: Replace `FILL_IN_BEFORE_USE` with your actual RPC provider API key
+2. **Verify network addresses**: Confirm all contract addresses and token IDs in `.env` are correct for mainnet (not testnet values)
+3. **Test on testnet first**: Always perform a full deployment and smoke test on testnet before mainnet
+4. **Double-check admin**: Ensure `ADMIN_ADDRESS` is the intended address — contract ownership cannot be transferred after initialization
+
+The `deploy.sh` script will **fail fast** if placeholder values remain in `config/mainnet.json`, preventing accidental mainnet deployments with incomplete configuration.
 
 ## Testing
 
