@@ -34,4 +34,6 @@ pub enum ScoutAccessError {
     InvalidInput = 15,
     /// No accumulated fees available to withdraw
     NoFeesToWithdraw = 16,
+    /// Scout attempted to upgrade/renew before the minimum interval elapsed
+    UpgradeTooSoon = 17,
 }

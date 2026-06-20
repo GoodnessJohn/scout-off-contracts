@@ -57,3 +57,10 @@ pub fn contract_unpaused(env: &Env, admin: &Address) {
     env.events()
         .publish((Symbol::new(env, "contract_unpaused"),), admin.clone());
 }
+
+pub fn subscription_refunded(env: &Env, scout: &Address, amount: i128) {
+    env.events().publish(
+        (Symbol::new(env, "subscription_refunded"), scout.clone()),
+        amount,
+    );
+}

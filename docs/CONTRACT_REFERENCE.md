@@ -931,16 +931,42 @@ stellar contract invoke --id $SCOUT_ACCESS_CONTRACT_ID \
 
 ---
 
+#### `refund_subscription(scout: Address, amount: i128) -> Result<(), ScoutAccessError>`
+
+Emergency admin function to return `amount` XLM (stroops) from the contract
+balance to a scout. Use when a scout is accidentally double-charged (e.g. by
+the race condition the upgrade timing guard is designed to prevent).
+
+| | |
+|---|---|
+| **Auth** | Admin must sign |
+| **Errors** | `Unauthorized` · `InvalidInput` (amount ≤ 0) |
+
+```bash
+stellar contract invoke --id $SCOUT_ACCESS_CONTRACT_ID \
+  -- refund_subscription \
+  --scout $SCOUT_ADDRESS \
+  --amount 1000000
+```
+
+---
+
 #### `subscribe(scout: Address, tier: SubscriptionTier) -> Result<(), ScoutAccessError>`
 
 Purchase a `Basic`, `Pro`, or `Elite` subscription. The XLM fee is transferred
 from the scout's wallet to the contract atomically. Downgrades to a cheaper
 tier while a subscription is still active are rejected.
 
+> **No-Proration Policy**: Upgrades to a higher tier do **not** provide credit
+> for unused time on the previous subscription. The full new-tier fee is charged
+> and `expires_at` is reset to `now + sub_duration_secs`. A minimum interval of
+> 1 hour between `subscribe` calls from the same scout is enforced to prevent
+> race conditions and double-charging.
+
 | | |
 |---|---|
 | **Auth** | `scout` must sign and pre-approve the XLM transfer |
-| **Errors** | `NotInitialized` · `ContractPaused` · `SubscriptionDowngradeNotAllowed` · `Overflow` |
+| **Errors** | `NotInitialized` · `ContractPaused` · `SubscriptionDowngradeNotAllowed` · `UpgradeTooSoon` · `Overflow` |
 
 ```bash
 stellar contract invoke --id $SCOUT_ACCESS_CONTRACT_ID \
@@ -1141,6 +1167,7 @@ stellar contract invoke --id $SCOUT_ACCESS_CONTRACT_ID -- health
 | `player_contacted` | event_name, scout (Address) | (player_id: u64, fee_paid: i128) | Scout unlocks player contact details |
 | `trial_offer_logged` | event_name, scout (Address) | player_id (u64) | Elite scout records a trial offer |
 | `fees_withdrawn` | event_name, to (Address) | amount (i128) | Admin withdraws accumulated fees |
+| `subscription_refunded` | event_name, scout (Address) | amount (i128) | Admin issues emergency refund to a scout |
 | `admin_transferred` | event_name | (old_admin: Address, new_admin: Address) | Admin rights rotated |
 | `contract_paused` | event_name | admin (Address) | Circuit breaker engaged |
 | `contract_unpaused` | event_name | admin (Address) | Circuit breaker released |
@@ -1373,6 +1400,7 @@ pub struct TrialOffer {
 | 12 | `SubscriptionDowngradeNotAllowed` | Downgrade attempted while subscription active |
 | 14 | `ProgressCallFailed` | Cross-contract `advance_level` failed |
 | 15 | `InvalidInput` | Zero or negative fee field in `FeeConfig` |
+| 17 | `UpgradeTooSoon` | Subscribe called before minimum interval elapsed |
 
 ---
 
@@ -1400,3 +1428,4 @@ pub struct TrialOffer {
 | `player_contacted` | scout_access | Scout unlocks player contact details |
 | `trial_offer_logged` | scout_access | Elite scout records a trial offer |
 | `fees_withdrawn` | scout_access | Admin withdraws accumulated fees |
+| `subscription_refunded` | scout_access | Admin issues emergency refund to a scout |

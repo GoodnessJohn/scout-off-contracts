@@ -68,6 +68,10 @@ const PERSISTENT_TTL_MAX: u32 = 2_000;
 const TRIAL_TTL_THRESHOLD: u32 = 259_200;
 const TRIAL_TTL_EXTEND_TO: u32 = 518_400;
 
+// Minimum interval (seconds) between subscribe calls for the same scout
+// to prevent race conditions / double-charging on rapid upgrades.
+const MIN_UPGRADE_INTERVAL_SECS: u64 = 3600;
+
 #[contract]
 pub struct ScoutAccessContract;
 
@@ -178,6 +182,27 @@ impl ScoutAccessContract {
         Ok(())
     }
 
+    /// Emergency refund: admin returns `amount` XLM (stroops) from the
+    /// contract balance to `scout`.  Use when a scout is accidentally
+    /// double-charged (e.g. by the race condition this interval guard
+    /// is designed to prevent).
+    pub fn refund_subscription(
+        env: Env,
+        scout: Address,
+        amount: i128,
+    ) -> Result<(), ScoutAccessError> {
+        Self::bump_instance_ttl(&env);
+        Self::require_admin(&env)?;
+        if amount <= 0 {
+            return Err(ScoutAccessError::InvalidInput);
+        }
+        let xlm = Self::get_token(&env);
+        let contract_addr = env.current_contract_address();
+        token::Client::new(&env, &xlm).transfer(&contract_addr, &scout, &amount);
+        events::subscription_refunded(&env, &scout, amount);
+        Ok(())
+    }
+
     // -------------------------------------------------------------------------
     // Scout subscription
     // -------------------------------------------------------------------------
@@ -204,15 +229,24 @@ impl ScoutAccessContract {
 
         // Downgrade guard: if an active subscription exists, only allow same
         // tier or an upgrade. Downgrades before expiry are rejected.
+        // Also enforce a minimum interval between subscribe calls to prevent
+        // race conditions / double-charging on rapid upgrades.
         if let Some(existing) = env
             .storage()
             .persistent()
             .get::<DataKey, Subscription>(&DataKey::Subscription(scout.clone()))
         {
-            if now <= existing.expires_at
-                && Self::tier_rank(&tier) < Self::tier_rank(&existing.tier)
-            {
-                return Err(ScoutAccessError::SubscriptionDowngradeNotAllowed);
+            if now <= existing.expires_at {
+                if Self::tier_rank(&tier) < Self::tier_rank(&existing.tier) {
+                    return Err(ScoutAccessError::SubscriptionDowngradeNotAllowed);
+                }
+                let min_next = existing
+                    .subscribed_at
+                    .checked_add(MIN_UPGRADE_INTERVAL_SECS)
+                    .ok_or(ScoutAccessError::Overflow)?;
+                if now < min_next {
+                    return Err(ScoutAccessError::UpgradeTooSoon);
+                }
             }
         }
 
@@ -1169,6 +1203,11 @@ mod tests {
         client.subscribe(&scout, &SubscriptionTier::Basic);
         let basic_sub = client.get_subscription(&scout);
 
+        // Advance past the minimum interval to allow the upgrade
+        env.ledger().with_mut(|l| {
+            l.timestamp += MIN_UPGRADE_INTERVAL_SECS + 1;
+        });
+
         client.subscribe(&scout, &SubscriptionTier::Elite);
         let elite_sub = client.get_subscription(&scout);
 
@@ -1183,6 +1222,12 @@ mod tests {
         mint_token(&env, &xlm, &admin, &scout, 100_000_000);
 
         client.subscribe(&scout, &SubscriptionTier::Pro);
+
+        // Advance past the minimum interval to allow the upgrade
+        env.ledger().with_mut(|l| {
+            l.timestamp += MIN_UPGRADE_INTERVAL_SECS + 1;
+        });
+
         client.subscribe(&scout, &SubscriptionTier::Elite);
 
         let sub = client.get_subscription(&scout);
@@ -1221,5 +1266,97 @@ mod tests {
 
         let result = client.try_subscribe(&scout, &SubscriptionTier::Pro);
         assert!(result.is_ok());
+    }
+
+    // -------------------------------------------------------------------------
+    // Upgrade timing guard tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_rapid_upgrade_rejected() {
+        let (env, admin, xlm, _contract_id, client) = setup();
+        let scout = Address::generate(&env);
+        mint_token(&env, &xlm, &admin, &scout, 100_000_000);
+
+        // Subscribe to Basic
+        client.subscribe(&scout, &SubscriptionTier::Basic);
+
+        // Attempt upgrade to Elite immediately — should be rejected
+        let result = client.try_subscribe(&scout, &SubscriptionTier::Elite);
+        assert_eq!(result, Err(Ok(ScoutAccessError::UpgradeTooSoon)));
+    }
+
+    #[test]
+    fn test_rapid_same_tier_renewal_rejected() {
+        let (env, admin, xlm, _contract_id, client) = setup();
+        let scout = Address::generate(&env);
+        mint_token(&env, &xlm, &admin, &scout, 100_000_000);
+
+        client.subscribe(&scout, &SubscriptionTier::Pro);
+
+        // Attempt same-tier renewal immediately — should be rejected
+        let result = client.try_subscribe(&scout, &SubscriptionTier::Pro);
+        assert_eq!(result, Err(Ok(ScoutAccessError::UpgradeTooSoon)));
+    }
+
+    #[test]
+    fn test_upgrade_after_interval_succeeds() {
+        let (env, admin, xlm, _contract_id, client) = setup();
+        let scout = Address::generate(&env);
+        mint_token(&env, &xlm, &admin, &scout, 100_000_000);
+
+        client.subscribe(&scout, &SubscriptionTier::Basic);
+
+        // Advance time past the minimum interval
+        env.ledger().with_mut(|l| {
+            l.timestamp += MIN_UPGRADE_INTERVAL_SECS + 1;
+        });
+
+        // Upgrade should now succeed
+        let result = client.try_subscribe(&scout, &SubscriptionTier::Elite);
+        assert!(result.is_ok());
+        let sub = client.get_subscription(&scout);
+        assert_eq!(sub.tier, SubscriptionTier::Elite);
+    }
+
+    // -------------------------------------------------------------------------
+    // refund_subscription tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_refund_subscription_success() {
+        let (env, admin, xlm, _contract_id, client) = setup();
+        let scout = Address::generate(&env);
+        mint_token(&env, &xlm, &admin, &scout, 100_000_000);
+
+        client.subscribe(&scout, &SubscriptionTier::Elite);
+
+        let contract_balance_before = TokenClient::new(&env, &xlm).balance(&client.address);
+        let scout_balance_before = TokenClient::new(&env, &xlm).balance(&scout);
+
+        let refund_amount = 1_000_000i128;
+        client.refund_subscription(&scout, &refund_amount);
+
+        let contract_balance_after = TokenClient::new(&env, &xlm).balance(&client.address);
+        let scout_balance_after = TokenClient::new(&env, &xlm).balance(&scout);
+
+        assert_eq!(contract_balance_before - refund_amount, contract_balance_after);
+        assert_eq!(scout_balance_before + refund_amount, scout_balance_after);
+    }
+
+    #[test]
+    fn test_refund_subscription_zero_amount_rejected() {
+        let (env, _admin, _xlm, _contract_id, client) = setup();
+        let scout = Address::generate(&env);
+        let result = client.try_refund_subscription(&scout, &0i128);
+        assert_eq!(result, Err(Ok(ScoutAccessError::InvalidInput)));
+    }
+
+    #[test]
+    fn test_refund_subscription_negative_amount_rejected() {
+        let (env, _admin, _xlm, _contract_id, client) = setup();
+        let scout = Address::generate(&env);
+        let result = client.try_refund_subscription(&scout, &(-1i128));
+        assert_eq!(result, Err(Ok(ScoutAccessError::InvalidInput)));
     }
 }
