@@ -1,44 +1,96 @@
 #!/usr/bin/env bash
-# ScoutChain — initialize all deployed contracts
+# ScoutChain — initialize all deployed contracts and wire cross-contract links.
 # Run after deploy.sh. Requires .env.contracts to exist.
+# Usage: ./scripts/initialize.sh [testnet|mainnet]
+#
+# Requires (in .env or environment):
+#   ADMIN_ADDRESS      — Stellar G-address that will own all contracts
+#   DEPLOYER_SECRET    — Stellar secret key used to invoke contracts
+#   XLM_TOKEN_ADDRESS  — Native XLM token contract address on the target network
+#
+# Exits non-zero immediately if any step fails (set -euo pipefail).
 set -euo pipefail
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+die() { echo "ERROR: $*" >&2; exit 1; }
+
+require_nonempty() {
+  local value="$1"
+  local label="$2"
+  [[ -n "$value" ]] || die "$label is empty. Re-run deploy.sh and ensure it succeeded."
+}
+
+invoke_contract() {
+  # invoke_contract <label> <contract_id> [extra stellar args...]
+  local label="$1"; shift
+  local contract_id="$1"; shift
+
+  echo "==> $label..."
+  stellar contract invoke \
+    --id "$contract_id" \
+    --source "$DEPLOYER" \
+    --network "$NETWORK" \
+    "$@" \
+    || die "$label failed."
+  echo "    OK"
+}
+
+# ---------------------------------------------------------------------------
+# Pre-flight: validate .env.contracts exists and all IDs are non-empty
+# ---------------------------------------------------------------------------
+
 NETWORK="${1:-testnet}"
+
+[[ -f .env.contracts ]] || die ".env.contracts not found. Run ./scripts/deploy.sh $NETWORK first."
+
+# shellcheck source=/dev/null
 source .env.contracts
 
-ADMIN="${ADMIN_ADDRESS:?Set ADMIN_ADDRESS}"
-DEPLOYER="${DEPLOYER_SECRET:?Set DEPLOYER_SECRET}"
-XLM_TOKEN="${XLM_TOKEN_ADDRESS:?Set XLM_TOKEN_ADDRESS}"
+require_nonempty "${REGISTRATION_CONTRACT_ID:-}"  "REGISTRATION_CONTRACT_ID"
+require_nonempty "${VERIFICATION_CONTRACT_ID:-}"  "VERIFICATION_CONTRACT_ID"
+require_nonempty "${PROGRESS_CONTRACT_ID:-}"      "PROGRESS_CONTRACT_ID"
+require_nonempty "${SCOUT_ACCESS_CONTRACT_ID:-}"  "SCOUT_ACCESS_CONTRACT_ID"
 
-echo "==> Initializing registration contract..."
-stellar contract invoke \
-  --id "$REGISTRATION_CONTRACT_ID" \
-  --source "$DEPLOYER" \
-  --network "$NETWORK" \
+ADMIN="${ADMIN_ADDRESS:?Set ADMIN_ADDRESS in .env or environment}"
+DEPLOYER="${DEPLOYER_SECRET:?Set DEPLOYER_SECRET in .env or environment}"
+XLM_TOKEN="${XLM_TOKEN_ADDRESS:?Set XLM_TOKEN_ADDRESS in .env or environment}"
+
+echo "==> Initializing contracts on $NETWORK"
+echo "    Admin:        $ADMIN"
+echo "    Registration: $REGISTRATION_CONTRACT_ID"
+echo "    Verification: $VERIFICATION_CONTRACT_ID"
+echo "    Progress:     $PROGRESS_CONTRACT_ID"
+echo "    Scout Access: $SCOUT_ACCESS_CONTRACT_ID"
+echo ""
+
+# ---------------------------------------------------------------------------
+# Initialize each contract
+# ---------------------------------------------------------------------------
+
+invoke_contract \
+  "Initializing registration contract" \
+  "$REGISTRATION_CONTRACT_ID" \
   -- initialize \
   --admin "$ADMIN"
 
-echo "==> Initializing verification contract..."
-stellar contract invoke \
-  --id "$VERIFICATION_CONTRACT_ID" \
-  --source "$DEPLOYER" \
-  --network "$NETWORK" \
+invoke_contract \
+  "Initializing verification contract" \
+  "$VERIFICATION_CONTRACT_ID" \
   -- initialize \
   --admin "$ADMIN"
 
-echo "==> Initializing progress contract..."
-stellar contract invoke \
-  --id "$PROGRESS_CONTRACT_ID" \
-  --source "$DEPLOYER" \
-  --network "$NETWORK" \
+invoke_contract \
+  "Initializing progress contract" \
+  "$PROGRESS_CONTRACT_ID" \
   -- initialize \
   --admin "$ADMIN"
 
-echo "==> Initializing scout_access contract..."
-stellar contract invoke \
-  --id "$SCOUT_ACCESS_CONTRACT_ID" \
-  --source "$DEPLOYER" \
-  --network "$NETWORK" \
+invoke_contract \
+  "Initializing scout_access contract" \
+  "$SCOUT_ACCESS_CONTRACT_ID" \
   -- initialize \
   --admin "$ADMIN" \
   --xlm_token "$XLM_TOKEN" \
@@ -50,13 +102,32 @@ stellar contract invoke \
     "sub_duration_secs": 2592000
   }'
 
-echo "==> Wiring verification → progress cross-contract link..."
-stellar contract invoke \
-  --id "$VERIFICATION_CONTRACT_ID" \
-  --source "$DEPLOYER" \
-  --network "$NETWORK" \
+# ---------------------------------------------------------------------------
+# Wire cross-contract links
+# ---------------------------------------------------------------------------
+
+invoke_contract \
+  "Wiring verification → progress (set_progress_contract)" \
+  "$VERIFICATION_CONTRACT_ID" \
   -- set_progress_contract \
   --progress_contract "$PROGRESS_CONTRACT_ID"
 
+invoke_contract \
+  "Wiring scout_access → progress (set_progress_contract)" \
+  "$SCOUT_ACCESS_CONTRACT_ID" \
+  -- set_progress_contract \
+  --addr "$PROGRESS_CONTRACT_ID"
+
+invoke_contract \
+  "Wiring registration → progress (set_progress_contract)" \
+  "$REGISTRATION_CONTRACT_ID" \
+  -- set_progress_contract \
+  --addr "$PROGRESS_CONTRACT_ID"
+
+# ---------------------------------------------------------------------------
+# Done
+# ---------------------------------------------------------------------------
+
 echo ""
-echo "==> All contracts initialized and wired."
+echo "==> All contracts initialized and wired successfully."
+echo "    Run ./scripts/generate-bindings.sh $NETWORK to produce TypeScript clients."
