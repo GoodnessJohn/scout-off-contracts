@@ -52,3 +52,16 @@ jobs:
         run: cargo clippy --workspace -- -D warnings
       - name: Format check
         run: cargo fmt --all -- --check
+
+      - name: Shell script lint (shellcheck)
+        run: |
+          sudo apt-get install -y shellcheck
+          shellcheck scripts/deploy.sh
+          shellcheck scripts/initialize.sh
+          shellcheck scripts/setup-testnet.sh
+          shellcheck scripts/generate-bindings.sh
+          shellcheck testnet/seed.sh
+
+      - name: Docs completeness check
+        run: bash scripts/check-docs.sh
+
